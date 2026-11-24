@@ -59,12 +59,24 @@ async function run() {
   console.log('\x1b[36m%s\x1b[0m', '🚀 Initializing Database with Neon Serverless...');
   try {
     const sql = neon(databaseUrl);
-    
-    // Split statements safely
-    // Neon query function can execute raw statements or multi-statement string
-    await sql(schemaSql);
 
-    console.log('\x1b[32m%s\x1b[0m', '✅ Database schema initialized successfully!');
+    // Strip line comments
+    const stripped = schemaSql.replace(/--.*$/gm, '');
+    // Split into individual SQL statements
+    const statements = stripped
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    for (const stmt of statements) {
+      if (typeof sql.query === 'function') {
+        await sql.query(stmt);
+      } else {
+        await sql(stmt);
+      }
+    }
+
+    console.log('\x1b[32m%s\x1b[0m', '✅ Database schema initialized successfully on Neon!');
     console.log('\x1b[32m%s\x1b[0m', '   - event_settings created with default record');
     console.log('\x1b[32m%s\x1b[0m', '   - candidates table ready');
     console.log('\x1b[32m%s\x1b[0m', '   - votes table ready');
