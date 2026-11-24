@@ -429,21 +429,21 @@ export default function ProjectorDisplayPage() {
       {/* 2. STAGE VIEW: OPEN (LIVE VOTING + COUNTDOWN + LIVE BARS)   */}
       {/* ========================================================= */}
       {activeMode === 'OPEN' && (
-        <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-5 sm:px-8 py-6 flex flex-col gap-6 animate-fade-up">
+        <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-5 sm:px-8 py-6 sm:py-10 flex flex-col justify-center gap-6 animate-fade-up">
           {/* Top Banner: Countdown Timer & Live Votes Counter */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-stretch">
             {/* Countdown Timer Display */}
-            <div className="md:col-span-6 rounded-3xl bg-white/15 backdrop-blur-xl border border-white/25 p-5 shadow-2xl flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <Clock className="w-6 h-6 text-amber-300" />
+            <div className="md:col-span-6 rounded-3xl bg-white/15 backdrop-blur-xl border border-white/25 p-5 sm:p-6 shadow-2xl flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-14 h-14 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center shadow-inner">
+                  <Clock className="w-7 h-7 text-amber-300" />
                 </div>
                 <div>
                   <p className="text-xs font-extrabold uppercase tracking-widest text-blue-200">
                     Sisa Waktu Voting
                   </p>
                   <div
-                    className={`text-4xl sm:text-5xl font-extrabold font-mono tracking-tight leading-none mt-1 ${
+                    className={`text-4xl sm:text-5xl font-extrabold font-mono tracking-tight leading-none mt-1.5 ${
                       timerSeconds <= 30 && timerSeconds > 0
                         ? 'text-rose-400 animate-pulse'
                         : 'text-white'
@@ -455,23 +455,23 @@ export default function ProjectorDisplayPage() {
               </div>
 
               <div className="text-right">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-400/25 border border-emerald-300/40 text-emerald-200 text-xs font-extrabold uppercase tracking-wider">
+                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-400/25 border border-emerald-300/40 text-emerald-200 text-xs font-extrabold uppercase tracking-wider">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                   Live Voting
                 </span>
-                <p className="text-[11px] text-blue-200/80 mt-1.5">
+                <p className="text-[11px] text-blue-200/80 mt-2">
                   Layar otomatis refresh
                 </p>
               </div>
             </div>
 
             {/* Total Votes Counter */}
-            <div className="md:col-span-6 rounded-3xl bg-white/15 backdrop-blur-xl border border-white/25 p-5 shadow-2xl flex items-center justify-between gap-4">
+            <div className="md:col-span-6 rounded-3xl bg-white/15 backdrop-blur-xl border border-white/25 p-5 sm:p-6 shadow-2xl flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-extrabold uppercase tracking-widest text-blue-200">
                   Total Suara Masuk
                 </p>
-                <div className="flex items-baseline gap-2 mt-1">
+                <div className="flex items-baseline gap-2 mt-1.5">
                   <span className="text-4xl sm:text-5xl font-extrabold text-white">
                     {totalVotes.toLocaleString()}
                   </span>
@@ -482,7 +482,7 @@ export default function ProjectorDisplayPage() {
                 <span className="text-xs text-emerald-300 font-extrabold">
                   {activeCount} Kandidat
                 </span>
-                <p className="text-[11px] text-blue-200/80 mt-1">
+                <p className="text-[11px] text-blue-200/80 mt-1.5">
                   1 Suara per Perangkat
                 </p>
               </div>
@@ -490,19 +490,19 @@ export default function ProjectorDisplayPage() {
           </div>
 
           {/* Main Content Area: Side QR Code + Live Vote Leaderboard Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
             {/* Side Column: Compact QR Code for latecomers */}
-            <div className="lg:col-span-4 flex flex-col items-center">
-              <div className="bg-white text-slate-900 rounded-3xl p-5 shadow-2xl border-4 border-white/80 w-full flex flex-col items-center">
-                <span className="px-3 py-1 rounded-full bg-theme-soft text-theme-primary text-[11px] font-extrabold uppercase tracking-wider mb-3">
+            <div className="lg:col-span-4 flex flex-col">
+              <div className="bg-white text-slate-900 rounded-[2.5rem] p-6 sm:p-7 shadow-2xl border-4 border-white/80 w-full h-full flex flex-col items-center justify-center">
+                <span className="px-4 py-1.5 rounded-full bg-theme-soft text-theme-primary text-xs font-black uppercase tracking-wider mb-4 shadow-sm">
                   Scan untuk Ikut Memilih
                 </span>
 
-                <div className="w-48 h-48 sm:w-56 sm:h-56 p-2 rounded-2xl border border-slate-100 bg-white flex items-center justify-center shadow-inner">
+                <div className="w-52 h-52 sm:w-60 sm:h-60 p-3 rounded-2xl border-2 border-slate-100 bg-white flex items-center justify-center shadow-inner">
                   {appUrl ? (
                     <QRCodeSVG
                       value={appUrl}
-                      size={210}
+                      size={230}
                       level="H"
                       includeMargin={false}
                       className="w-full h-full"
@@ -513,11 +513,11 @@ export default function ProjectorDisplayPage() {
                 </div>
 
                 {requirePin && (
-                  <div className="mt-3.5 w-full py-2 px-3 rounded-xl bg-slate-100 border border-slate-200 text-center">
+                  <div className="mt-4 w-full py-2.5 px-4 rounded-2xl bg-slate-100 border border-slate-200 text-center">
                     <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">
                       PIN RUANGAN
                     </span>
-                    <div className="text-xl font-extrabold font-mono tracking-[0.25em] text-slate-900">
+                    <div className="text-2xl font-black font-mono tracking-[0.25em] text-slate-900 mt-0.5">
                       {pinDisplay.split('').join(' ')}
                     </div>
                   </div>
@@ -526,9 +526,9 @@ export default function ProjectorDisplayPage() {
             </div>
 
             {/* Main Column: Live Nominees & Incoming Vote Distribution */}
-            <div className="lg:col-span-8 rounded-3xl bg-slate-950/40 backdrop-blur-xl border border-white/20 p-5 sm:p-6 shadow-2xl flex flex-col justify-between min-h-[420px]">
+            <div className="lg:col-span-8 rounded-[2.5rem] bg-slate-950/45 backdrop-blur-xl border border-white/20 p-6 sm:p-7 shadow-2xl flex flex-col justify-between min-h-[440px]">
               <div>
-                <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
+                <div className="flex items-center justify-between pb-3.5 mb-5 border-b border-white/10">
                   <h3 className="text-sm font-extrabold uppercase tracking-widest text-blue-200 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-300" />
                     <span>Pergerakan Suara Masuk Real-Time</span>
@@ -539,67 +539,79 @@ export default function ProjectorDisplayPage() {
                 </div>
 
                 {/* Candidate list with live bars */}
-                <div className="space-y-4">
-                  {candidates.map((c) => {
-                    const votes = c.votes || 0;
-                    const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 1000) / 10 : 0;
-                    return (
-                      <div
-                        key={c.id}
-                        className="rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 p-3.5 transition-all hover:bg-white/15"
-                      >
-                        <div className="flex items-center gap-3">
-                          {/* Candidate Photo thumbnail */}
-                          <div className="w-12 h-14 rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-white/30">
-                            <CandidateMedia
-                              photoData={c.photo_data}
-                              name={c.name}
-                              number={c.number}
-                            />
-                          </div>
-
-                          {/* Candidate info */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <div className="flex items-center gap-2 truncate">
-                                <span className="px-2 py-0.5 rounded-lg bg-white/20 text-blue-100 font-mono text-xs font-black">
-                                  No. {String(c.number).padStart(2, '0')}
-                                </span>
-                                <h4 className="text-sm sm:text-base font-extrabold text-white truncate">
-                                  {c.name}
-                                </h4>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <span className="text-sm sm:text-base font-extrabold text-white">
-                                  {votes}
-                                </span>
-                                <span className="text-xs text-blue-200 ml-1">({pct}%)</span>
-                              </div>
+                {candidates.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+                    <div className="w-16 h-16 rounded-3xl bg-white/10 border border-white/20 flex items-center justify-center text-blue-300 mb-4 shadow-inner">
+                      <Users className="w-8 h-8" />
+                    </div>
+                    <h4 className="text-base font-extrabold text-white">Menunggu Kandidat</h4>
+                    <p className="text-xs text-blue-200/80 max-w-sm mt-1.5 leading-relaxed">
+                      Belum ada kandidat aktif yang terdaftar untuk sesi ini. Tambahkan kandidat melalui dashboard Admin untuk melihat grafik voting secara langsung.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {candidates.map((c) => {
+                      const votes = c.votes || 0;
+                      const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 1000) / 10 : 0;
+                      return (
+                        <div
+                          key={c.id}
+                          className="rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 p-3.5 transition-all hover:bg-white/15"
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Candidate Photo thumbnail */}
+                            <div className="w-12 h-14 rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-white/30">
+                              <CandidateMedia
+                                photoData={c.photo_data}
+                                name={c.name}
+                                number={c.number}
+                              />
                             </div>
 
-                            {c.costume_theme && (
-                              <p className="text-[11px] text-blue-100/70 truncate mb-2">
-                                {c.costume_theme}
-                              </p>
-                            )}
+                            {/* Candidate info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div className="flex items-center gap-2 truncate">
+                                  <span className="px-2 py-0.5 rounded-lg bg-white/20 text-blue-100 font-mono text-xs font-black">
+                                    No. {String(c.number).padStart(2, '0')}
+                                  </span>
+                                  <h4 className="text-sm sm:text-base font-extrabold text-white truncate">
+                                    {c.name}
+                                  </h4>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-sm sm:text-base font-extrabold text-white">
+                                    {votes}
+                                  </span>
+                                  <span className="text-xs text-blue-200 ml-1">({pct}%)</span>
+                                </div>
+                              </div>
 
-                            {/* Live Animated Progress Bar */}
-                            <div className="w-full h-2.5 rounded-full bg-black/30 overflow-hidden border border-white/10">
-                              <div
-                                className="h-full rounded-full transition-all duration-700 ease-out"
-                                style={{
-                                  width: `${Math.max(pct, votes > 0 ? 3 : 0)}%`,
-                                  background:
-                                    'linear-gradient(90deg, #006FD6 0%, #38BDF8 60%, #FFFFFF 100%)',
-                                }}
-                              />
+                              {c.costume_theme && (
+                                <p className="text-[11px] text-blue-100/70 truncate mb-2">
+                                  {c.costume_theme}
+                                </p>
+                              )}
+
+                              {/* Live Animated Progress Bar */}
+                              <div className="w-full h-2.5 rounded-full bg-black/30 overflow-hidden border border-white/10">
+                                <div
+                                  className="h-full rounded-full transition-all duration-700 ease-out"
+                                  style={{
+                                    width: `${Math.max(pct, votes > 0 ? 3 : 0)}%`,
+                                    background:
+                                      'linear-gradient(90deg, #006FD6 0%, #38BDF8 60%, #FFFFFF 100%)',
+                                  }}
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -621,7 +633,7 @@ export default function ProjectorDisplayPage() {
             <div className="curtain-panel curtain-right" />
 
             {/* Revealed Top 3 Podium and Breakdown Content */}
-            <div className="relative z-10 max-w-6xl w-full mx-auto px-5 sm:px-8 py-6 flex-1 flex flex-col justify-between animate-fade-up">
+            <div className="relative z-10 max-w-6xl w-full mx-auto px-5 sm:px-8 py-6 sm:py-8 flex-1 flex flex-col justify-center animate-fade-up">
               {/* Header Title & Confetti re-trigger */}
               <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                 <div>
