@@ -22,6 +22,14 @@ export const metadata: Metadata = {
     template: `%s | ${appName}`,
   },
   description: "Live Event Voting System - Real-time, white-label voting platform for events and stages.",
+  icons: {
+    icon: [
+      { url: '/logo-himatifa.png' },
+      { url: '/icon.png' },
+    ],
+    shortcut: '/logo-himatifa.png',
+    apple: '/logo-himatifa.png',
+  },
 };
 
 export default function RootLayout({
