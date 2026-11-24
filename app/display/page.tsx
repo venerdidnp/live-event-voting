@@ -525,20 +525,21 @@ export default function ProjectorDisplayPage() {
               </div>
             </div>
 
-            {/* Main Column: Live Nominees & Incoming Vote Distribution */}
+            {/* Main Column: Live Nominees Showcase (Votes Hidden until CLOSED) */}
             <div className="lg:col-span-8 rounded-[2.5rem] bg-slate-950/45 backdrop-blur-xl border border-white/20 p-6 sm:p-7 shadow-2xl flex flex-col justify-between min-h-[440px]">
               <div>
                 <div className="flex items-center justify-between pb-3.5 mb-5 border-b border-white/10">
                   <h3 className="text-sm font-extrabold uppercase tracking-widest text-blue-200 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>Pergerakan Suara Masuk Real-Time</span>
+                    <span>Daftar Kandidat Nominasi — Voting Berlangsung</span>
                   </h3>
-                  <span className="text-xs font-bold text-emerald-300 animate-pulse">
-                    ● Live Updates
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold border border-amber-400/30 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    Hasil Dirahasiakan
                   </span>
                 </div>
 
-                {/* Candidate list with live bars */}
+                {/* Candidate list (Showcase mode, vote numbers hidden) */}
                 {candidates.length === 0 ? (
                   <div className="flex flex-col items-center justify-center text-center py-16 px-4">
                     <div className="w-16 h-16 rounded-3xl bg-white/10 border border-white/20 flex items-center justify-center text-blue-300 mb-4 shadow-inner">
@@ -546,72 +547,63 @@ export default function ProjectorDisplayPage() {
                     </div>
                     <h4 className="text-base font-extrabold text-white">Menunggu Kandidat</h4>
                     <p className="text-xs text-blue-200/80 max-w-sm mt-1.5 leading-relaxed">
-                      Belum ada kandidat aktif yang terdaftar untuk sesi ini. Tambahkan kandidat melalui dashboard Admin untuk melihat grafik voting secara langsung.
+                      Belum ada kandidat aktif yang terdaftar untuk sesi ini. Tambahkan kandidat melalui dashboard Admin.
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {candidates.map((c) => {
-                      const votes = c.votes || 0;
-                      const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 1000) / 10 : 0;
-                      return (
-                        <div
-                          key={c.id}
-                          className="rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 p-3.5 transition-all hover:bg-white/15"
-                        >
-                          <div className="flex items-center gap-3">
-                            {/* Candidate Photo thumbnail */}
-                            <div className="w-12 h-14 rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-white/30">
-                              <CandidateMedia
-                                photoData={c.photo_data}
-                                name={c.name}
-                                number={c.number}
-                              />
-                            </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[460px] overflow-y-auto pr-1">
+                    {candidates.map((c) => (
+                      <div
+                        key={c.id}
+                        className="rounded-2xl bg-white/10 backdrop-blur-md border border-white/15 p-3.5 flex items-center gap-3.5 transition-all hover:bg-white/15"
+                      >
+                        {/* Candidate Photo thumbnail */}
+                        <div className="w-14 h-16 rounded-xl overflow-hidden bg-slate-900 shrink-0 border border-white/30 shadow-md">
+                          <CandidateMedia
+                            photoData={c.photo_data}
+                            name={c.name}
+                            number={c.number}
+                          />
+                        </div>
 
-                            {/* Candidate info */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2 mb-1">
-                                <div className="flex items-center gap-2 truncate">
-                                  <span className="px-2 py-0.5 rounded-lg bg-white/20 text-blue-100 font-mono text-xs font-black">
-                                    No. {String(c.number).padStart(2, '0')}
-                                  </span>
-                                  <h4 className="text-sm sm:text-base font-extrabold text-white truncate">
-                                    {c.name}
-                                  </h4>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-sm sm:text-base font-extrabold text-white">
-                                    {votes}
-                                  </span>
-                                  <span className="text-xs text-blue-200 ml-1">({pct}%)</span>
-                                </div>
-                              </div>
-
-                              {c.costume_theme && (
-                                <p className="text-[11px] text-blue-100/70 truncate mb-2">
-                                  {c.costume_theme}
-                                </p>
-                              )}
-
-                              {/* Live Animated Progress Bar */}
-                              <div className="w-full h-2.5 rounded-full bg-black/30 overflow-hidden border border-white/10">
-                                <div
-                                  className="h-full rounded-full transition-all duration-700 ease-out"
-                                  style={{
-                                    width: `${Math.max(pct, votes > 0 ? 3 : 0)}%`,
-                                    background:
-                                      'linear-gradient(90deg, #006FD6 0%, #38BDF8 60%, #FFFFFF 100%)',
-                                  }}
-                                />
-                              </div>
-                            </div>
+                        {/* Candidate info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="px-2 py-0.5 rounded-md bg-white/20 text-blue-100 font-mono text-[11px] font-black">
+                              No. {String(c.number).padStart(2, '0')}
+                            </span>
+                            <span className="text-[10px] text-blue-200/90 font-bold uppercase tracking-wider truncate">
+                              {c.category}
+                            </span>
+                          </div>
+                          <h4 className="text-sm sm:text-base font-extrabold text-white truncate leading-tight">
+                            {c.name}
+                          </h4>
+                          {c.costume_theme && (
+                            <p className="text-[11px] text-blue-100/70 truncate mt-0.5">
+                              {c.costume_theme}
+                            </p>
+                          )}
+                          <div className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-emerald-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Bisa Dipilih Sekarang</span>
                           </div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 )}
+              </div>
+
+              {/* Suspense Footer Note */}
+              <div className="mt-5 pt-3.5 border-t border-white/10 flex items-center justify-between text-xs text-blue-200/80">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Perolehan suara dirahasiakan selama voting berlangsung</span>
+                </span>
+                <span className="font-bold text-white">
+                  Diungkapkan pada sesi Pengumuman Juara 🏆
+                </span>
               </div>
             </div>
           </div>
