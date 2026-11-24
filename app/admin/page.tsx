@@ -2,14 +2,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { CandidateMedia } from '@/components/CandidateMedia';
 import {
   Camera,
   Image as ImageIcon,
-  Edit2,
+  Pencil,
   Trash2,
-  Eye,
-  EyeOff,
   LogOut,
   Tv,
   Smartphone,
@@ -21,9 +20,12 @@ import {
   FlipHorizontal,
   Play,
   Square,
-  Clock,
   Plus,
-  Sparkles,
+  RefreshCw,
+  Copy,
+  Check,
+  BarChart3,
+  Clock,
 } from 'lucide-react';
 
 interface Candidate {
@@ -73,20 +75,23 @@ export default function AdminDashboardPage() {
   const [settings, setSettings] = useState<EventSettings | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [resultsData, setResultsData] = useState<ResultsData | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Settings form transient state
+  // Settings form transient state (protected against background polling overwrites)
   const [eventTitle, setEventTitle] = useState('');
   const [eventSubtitle, setEventSubtitle] = useState('');
   const [organizerLabel, setOrganizerLabel] = useState('');
   const [roomPin, setRoomPin] = useState('2026');
   const [timerMinutes, setTimerMinutes] = useState(5);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [copiedPin, setCopiedPin] = useState(false);
   const initialSettingsLoaded = useRef(false);
 
-  // Live timer countdown state in Admin
+  // Live timer countdown state
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
-  // Quick-Add Nominee transient state
+  // Add Nominee Modal & transient state
+  const [showAddModal, setShowAddModal] = useState(false);
   const [addNumber, setAddNumber] = useState('');
   const [addName, setAddName] = useState('');
   const [addCategory, setAddCategory] = useState('Participant');
@@ -151,7 +156,8 @@ export default function AdminDashboardPage() {
   }, [router]);
 
   // 2. Fetch Data once authenticated
-  const loadAdminData = async () => {
+  const loadAdminData = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
       const [settRes, candRes, resRes] = await Promise.all([
         fetch('/api/admin/settings'),
@@ -162,7 +168,7 @@ export default function AdminDashboardPage() {
       if (settRes.ok) {
         const settData = await settRes.json();
         setSettings(settData.settings);
-        // Only set form values on initial load to avoid overwriting user edits while typing
+        // Only populate controlled form inputs on initial load so typing is never overwritten
         if (!initialSettingsLoaded.current) {
           setEventTitle(settData.settings.event_title || '');
           setEventSubtitle(settData.settings.event_subtitle || '');
@@ -177,7 +183,6 @@ export default function AdminDashboardPage() {
         const cands = await candRes.json();
         setCandidates(cands.candidates || []);
 
-        // Auto calculate next number if addNumber is empty
         if (!addNumber && cands.candidates?.length) {
           const maxNum = Math.max(...cands.candidates.map((c: Candidate) => c.number), 0);
           setAddNumber(String(maxNum + 1).padStart(2, '0'));
@@ -190,15 +195,19 @@ export default function AdminDashboardPage() {
         const resData = await resRes.json();
         setResultsData(resData);
       }
+
+      if (isManual) showToast('Dashboard refreshed', 'info');
     } catch (err) {
       console.error('Failed to load admin data:', err);
+    } finally {
+      if (isManual) setRefreshing(false);
     }
   };
 
   useEffect(() => {
     if (authenticated) {
       loadAdminData();
-      const interval = setInterval(loadAdminData, 5000); // 5s auto-polling
+      const interval = setInterval(() => loadAdminData(false), 5000);
       return () => clearInterval(interval);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,7 +230,7 @@ export default function AdminDashboardPage() {
   }, [settings?.status, settings?.ends_at]);
 
   const formatTimerString = (sec: number | null) => {
-    if (sec === null) return '--:--';
+    if (sec === null) return `${String(timerMinutes).padStart(2, '0')}:00`;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -247,7 +256,7 @@ export default function AdminDashboardPage() {
       sx = (srcWidth - sw) / 2;
     } else {
       sh = srcWidth / targetRatio;
-      sy = Math.max(0, (srcHeight - sh) * 0.35); // slightly upper bias for faces
+      sy = Math.max(0, (srcHeight - sh) * 0.35);
     }
 
     const outH = Math.min(maxH, Math.round(sh));
@@ -350,7 +359,6 @@ export default function AdminDashboardPage() {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
 
-    // Flash animation
     setCameraFlash(true);
     setTimeout(() => setCameraFlash(false), 300);
 
@@ -360,7 +368,6 @@ export default function AdminDashboardPage() {
     }, 200);
   };
 
-  // Fallback Camera input
   const handleNativeCameraFallback = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -378,7 +385,10 @@ export default function AdminDashboardPage() {
   };
 
   // Save Settings
-  const handleSaveSettings = async (partialUpdate?: Partial<EventSettings> & { extend_minutes?: number }) => {
+  const handleSaveSettings = async (
+    partialUpdate?: Partial<EventSettings> & { extend_minutes?: number },
+    customToast?: string
+  ) => {
     setSavingSettings(true);
     try {
       const payload = partialUpdate || {
@@ -405,12 +415,12 @@ export default function AdminDashboardPage() {
           setRoomPin(data.settings.room_pin || '2026');
           setTimerMinutes(data.settings.timer_minutes || 5);
         }
-        showToast('Pengaturan berhasil disimpan!', 'success');
+        showToast(customToast || 'Settings saved successfully!', 'success');
       } else {
-        showToast('Gagal menyimpan pengaturan.', 'error');
+        showToast('Failed to save settings.', 'error');
       }
     } catch {
-      showToast('Gagal terhubung ke server.', 'error');
+      showToast('Failed to connect to server.', 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -418,37 +428,44 @@ export default function AdminDashboardPage() {
 
   // Dedicated Session Workflow Actions
   const handleStartVoting = async () => {
-    await handleSaveSettings({
-      status: 'OPEN',
-      timer_minutes: timerMinutes,
-    });
-    showToast(`▶ Sesi voting dibuka (${timerMinutes} menit)!`, 'success');
+    await handleSaveSettings(
+      {
+        status: 'OPEN',
+        timer_minutes: timerMinutes,
+      },
+      `Voting opened (${timerMinutes} min timer started)!`
+    );
   };
 
   const handleFinishVotingNow = async () => {
-    await handleSaveSettings({
-      status: 'CLOSED',
-      ends_at: null,
-    });
-    showToast('⏹ Sesi voting ditutup! Hasil pemenang tampil di layar display.', 'success');
+    await handleSaveSettings(
+      {
+        status: 'CLOSED',
+        ends_at: null,
+      },
+      'Voting closed! Winners revealed on stage display.'
+    );
   };
 
   const handleResetToWaiting = async () => {
-    await handleSaveSettings({
-      status: 'WAITING',
-      ends_at: null,
-    });
-    showToast('↺ Sesi direset ke mode Menunggu (Layar kembali ke QR Code).', 'info');
+    await handleSaveSettings(
+      {
+        status: 'WAITING',
+        ends_at: null,
+      },
+      'Session reset to WAITING mode (Stage shows QR code).'
+    );
   };
 
   const handleExtendTimer = async (mins: number) => {
-    await handleSaveSettings({
-      extend_minutes: mins,
-    });
-    showToast(`+${mins} Menit ditambahkan ke waktu voting!`, 'success');
+    await handleSaveSettings(
+      {
+        extend_minutes: mins,
+      },
+      `Added +${mins} minute${mins > 1 ? 's' : ''} to countdown timer!`
+    );
   };
 
-  // Status Switcher
   const handleSetStatus = async (status: 'WAITING' | 'OPEN' | 'CLOSED') => {
     if (status === 'OPEN') {
       await handleStartVoting();
@@ -459,10 +476,19 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Room PIN toggle
   const handleToggleRequirePin = async () => {
     if (!settings) return;
-    await handleSaveSettings({ require_pin: !settings.require_pin });
+    await handleSaveSettings(
+      { require_pin: !settings.require_pin },
+      !settings.require_pin ? 'Room PIN enabled' : 'Room PIN disabled'
+    );
+  };
+
+  const handleCopyPin = () => {
+    navigator.clipboard?.writeText(roomPin || settings?.room_pin || '2026');
+    setCopiedPin(true);
+    showToast('Room PIN copied', 'info');
+    setTimeout(() => setCopiedPin(false), 2000);
   };
 
   // Add Candidate
@@ -494,17 +520,16 @@ export default function AdminDashboardPage() {
 
       if (res.ok) {
         showToast(
-          addAsDraft
-            ? `Nominee saved as Draft.`
-            : `Nominee successfully published live!`,
+          addAsDraft ? 'Nominee saved as Draft.' : 'Nominee published live!',
           'success'
         );
-        // Reset form
         setAddName('');
         setAddTheme('');
         setAddPhotoDataUrl(null);
         setAddCompressBadge(null);
         setAddAsDraft(false);
+        setAddNumber('');
+        setShowAddModal(false);
         await loadAdminData();
       } else {
         const err = await res.json();
@@ -571,7 +596,7 @@ export default function AdminDashboardPage() {
       });
       if (res.ok) {
         showToast(
-          !cand.is_active ? `No. ${cand.number} is now Live.` : `No. ${cand.number} set to Draft.`,
+          !cand.is_active ? `No. ${cand.number} is now Active.` : `No. ${cand.number} set to Draft.`,
           'info'
         );
         await loadAdminData();
@@ -639,7 +664,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Logout
   const handleLogout = async () => {
     await fetch('/api/admin/auth', { method: 'DELETE' });
     router.push('/admin/login');
@@ -648,317 +672,166 @@ export default function AdminDashboardPage() {
   if (authenticated === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-theme-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   const totalVotes = resultsData?.total_votes || 0;
   const activeNomineesCount = candidates.filter((c) => c.is_active).length;
+  const currentStatus = settings?.status || 'WAITING';
+  const duplicateIpCount = resultsData?.anomalies?.duplicate_ips?.length || 0;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-16">
-      {/* Toast Alert */}
+    <div className="min-h-screen bg-[#F8FAFC] font-[family-name:var(--font-inter)] text-[#0F172A] pb-16">
+      {/* Bottom Pill Toast (Superdesign) */}
       {toastMessage && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[80] max-w-sm w-full px-4 animate-fade-up">
-          <div
-            className={`px-4 py-3 rounded-2xl shadow-xl text-xs font-extrabold flex items-center gap-2.5 text-white ${
-              toastType === 'success'
-                ? 'bg-emerald-600'
-                : toastType === 'error'
-                ? 'bg-rose-600'
-                : 'bg-slate-900'
-            }`}
-          >
-            {toastType === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-            )}
-            <span>{toastMessage}</span>
-          </div>
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] rounded-full px-5 py-3 text-sm font-semibold text-white shadow-xl flex items-center gap-2 animate-fade-up ${
+            toastType === 'error'
+              ? 'bg-rose-600'
+              : toastType === 'success'
+              ? 'bg-[#0F172A]'
+              : 'bg-slate-800'
+          }`}
+        >
+          {toastType === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : toastType === 'error' ? (
+            <AlertTriangle className="w-4 h-4 text-rose-200 shrink-0" />
+          ) : null}
+          <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Top Navbar */}
-      <nav className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-30 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-xl bg-theme-primary text-white font-extrabold text-xs flex items-center justify-center shadow">
-              ADM
-            </span>
-            <div>
-              <h1 className="text-sm sm:text-base font-extrabold tracking-tight">
-                Venue Admin Control
-              </h1>
-              <p className="text-[11px] text-slate-400">
-                {settings?.event_title || 'Live Event'}
-              </p>
-            </div>
+      {/* Sticky White Top Header */}
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex h-[76px] max-w-[1360px] items-center justify-between px-4 sm:px-8 gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-theme-primary truncate">
+              {settings?.event_title || 'Live Event Voting'}
+            </p>
+            <h1 className="mt-0.5 text-lg sm:text-xl font-bold tracking-tight truncate">
+              Committee Dashboard
+            </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Status Pill */}
+            <span
+              className={`hidden md:inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-semibold ${
+                currentStatus === 'OPEN'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : currentStatus === 'WAITING'
+                  ? 'bg-amber-50 text-amber-700'
+                  : 'bg-rose-50 text-rose-700'
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  currentStatus === 'OPEN'
+                    ? 'bg-green-500 pulse-dot'
+                    : currentStatus === 'WAITING'
+                    ? 'bg-amber-500'
+                    : 'bg-rose-500'
+                }`}
+              />
+              {currentStatus === 'OPEN'
+                ? 'Voting Open'
+                : currentStatus === 'WAITING'
+                ? 'Waiting'
+                : 'Voting Closed'}
+            </span>
+
+            {/* Quick Links */}
+            <Link
+              href="/admin/capture"
+              className="flex h-10 items-center gap-1.5 rounded-full border border-slate-200 px-3.5 text-xs font-semibold text-slate-600 transition hover:border-theme-primary hover:text-theme-primary"
+              title="Open Mobile Quick Capture Camera"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Quick Capture</span>
+            </Link>
+
             <a
               href="/"
               target="_blank"
               rel="noreferrer"
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 transition"
-              title="Open Voter HP View"
+              className="flex h-10 items-center gap-1.5 rounded-full border border-slate-200 px-3.5 text-xs font-semibold text-slate-600 transition hover:border-theme-primary hover:text-theme-primary"
+              title="Open Voter HP Screen"
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Voter Screen</span>
             </a>
+
             <a
               href="/display"
               target="_blank"
               rel="noreferrer"
-              className="px-3 py-1.5 rounded-xl bg-theme-primary hover:opacity-90 text-xs font-bold text-white flex items-center gap-1.5 transition shadow"
+              className="flex h-10 items-center gap-1.5 rounded-full bg-theme-primary px-3.5 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(0,111,214,0.22)] transition hover:bg-theme-dark"
               title="Open Stage Projector View"
             >
               <Tv className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Projector</span>
             </a>
+
+            {/* Refresh Button */}
             <button
+              type="button"
+              onClick={() => loadAdminData(true)}
+              aria-label="Refresh dashboard"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-theme-primary hover:text-theme-primary cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Sign Out */}
+            <button
+              type="button"
               onClick={handleLogout}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/80 hover:text-rose-300 text-slate-400 transition cursor-pointer"
+              aria-label="Sign Out"
               title="Sign Out"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
-      </nav>
+      </header>
 
-      {/* Main Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        
-        {/* SECTION 1: EVENT IDENTITY & SESSION STATUS CONTROL */}
-        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm space-y-6">
-          {/* Header Row */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+      <main className="mx-auto max-w-[1360px] px-4 sm:px-8 py-7 space-y-7">
+        {/* SECTION 1: 3-COLUMN UNIFIED CONTROL STRIP */}
+        <section className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 rounded-[24px] bg-white shadow-[0_14px_38px_rgba(15,23,42,0.07),0_2px_8px_rgba(15,23,42,0.03)]">
+          {/* Column 1: Session State & Quick Action */}
+          <div className="p-6 flex flex-col justify-between">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-theme-soft text-theme-primary text-[11px] font-extrabold uppercase tracking-wider">
-                  ⚡ Mission Control
-                </span>
-                <span
-                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
-                    settings?.status === 'OPEN'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : settings?.status === 'WAITING'
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-rose-100 text-rose-800'
-                  }`}
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Session State
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowResetVotesModal(true)}
+                  className="rounded-full border border-red-200 px-3 py-1.5 text-[11px] font-semibold text-red-600 transition hover:bg-red-50 cursor-pointer"
                 >
-                  ● {settings?.status || 'WAITING'}
-                </span>
+                  Reset Session
+                </button>
               </div>
-              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                Kontrol Sesi Voting & Durasi
-              </h2>
-            </div>
 
-            {/* Quick Live Counters */}
-            <div className="grid grid-cols-2 gap-3 shrink-0">
-              <div className="px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200/70 text-center">
-                <p className="text-[10px] font-bold uppercase text-slate-500">Total Suara</p>
-                <p className="text-xl sm:text-2xl font-extrabold text-slate-900 leading-tight">
-                  {totalVotes.toLocaleString()}
-                </p>
-              </div>
-              <div className="px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200/70 text-center">
-                <p className="text-[10px] font-bold uppercase text-slate-500">Kandidat Aktif</p>
-                <p className="text-xl sm:text-2xl font-extrabold text-theme-primary leading-tight">
-                  {activeNomineesCount}/{candidates.length}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* DYNAMIC MISSION CONTROL BANNER BY STATUS */}
-          {settings?.status === 'WAITING' && (
-            <div className="rounded-2xl bg-amber-50 border border-amber-200/80 p-5">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-900">
-                      Mode Menunggu — Layar Display Hanya Menampilkan QR Code
-                    </h3>
-                  </div>
-                  <p className="text-xs text-amber-800/90 leading-relaxed max-w-xl">
-                    Peserta yang scan QR code saat ini berada di ruang tunggu. Tentukan durasi voting di bawah, lalu klik <strong>Buka Sesi Voting Sekarang</strong> untuk memulai live voting secara serentak di layar display!
-                  </p>
-
-                  {/* Timer selection */}
-                  <div className="pt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-amber-950 mr-1 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" /> Durasi Voting:
-                    </span>
-                    {[1, 2, 3, 5, 10].map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => {
-                          setTimerMinutes(m);
-                          handleSaveSettings({ timer_minutes: m });
-                        }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-                          timerMinutes === m
-                            ? 'bg-amber-600 text-white shadow-sm'
-                            : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
-                        }`}
-                      >
-                        {m} Menit
-                      </button>
-                    ))}
-                    <div className="flex items-center gap-1 ml-2">
-                      <input
-                        type="number"
-                        min="1"
-                        max="60"
-                        value={timerMinutes}
-                        onChange={(e) => setTimerMinutes(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                        className="w-16 px-2 py-1 text-xs font-bold text-center bg-white border border-amber-300 rounded-lg text-amber-950 focus:outline-none"
-                      />
-                      <span className="text-[11px] font-semibold text-amber-800">mnt</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleStartVoting}
-                    disabled={savingSettings}
-                    className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-extrabold text-sm sm:text-base shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <Play className="w-5 h-5 fill-current" />
-                    <span>▶ Buka Sesi Voting Sekarang ({timerMinutes} Menit)</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {settings?.status === 'OPEN' && (
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200/90 p-5 animate-fade-up">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
-                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-emerald-900">
-                      ⚡ Sesi Voting Sedang Berlangsung!
-                    </h3>
-                  </div>
-                  <p className="text-xs text-emerald-800 leading-relaxed max-w-xl">
-                    Layar display otomatis menampilkan live incoming vote & countdown timer. Jika voting sudah cukup atau waktu terlalu lama, Anda dapat langsung mengakhiri sesi kapan saja dengan tombol merah di kanan.
-                  </p>
-
-                  {/* Timer display & Extension */}
-                  <div className="flex flex-wrap items-center gap-3 pt-2">
-                    <div className="px-4 py-2 rounded-xl bg-white border border-emerald-300 flex items-center gap-2 shadow-sm">
-                      <Clock className="w-4 h-4 text-emerald-600" />
-                      <span className="text-xs font-bold text-emerald-800">Sisa Waktu:</span>
-                      <span className="font-mono text-xl sm:text-2xl font-extrabold text-emerald-950 tracking-tight">
-                        {formatTimerString(remainingSeconds)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold text-emerald-800">Perpanjang:</span>
-                      <button
-                        type="button"
-                        onClick={() => handleExtendTimer(1)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-xs font-bold text-emerald-900 shadow-sm transition cursor-pointer flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> 1m
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleExtendTimer(2)}
-                        className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-xs font-bold text-emerald-900 shadow-sm transition cursor-pointer flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> 2m
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Big Emergency Finish Button */}
-                <div className="shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleFinishVotingNow}
-                    disabled={savingSettings}
-                    className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-extrabold text-sm sm:text-base shadow-xl shadow-rose-600/30 transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <Square className="w-5 h-5 fill-current" />
-                    <span>⏹ Selesaikan Voting Sekarang (Finish & Reveal)</span>
-                  </button>
-                  <p className="text-[11px] text-center text-rose-800 mt-1 font-semibold">
-                    Layar display akan langsung menampilkan juara & confetti!
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {settings?.status === 'CLOSED' && (
-            <div className="rounded-2xl bg-slate-900 text-white p-5 animate-fade-up">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-300">
-                      Voting Selesai — Layar Display Menampilkan Pemenang
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
-                    Tirai display telah terbuka dan pemenang Top 3 sedang ditampilkan di panggung utama. Anda dapat mereset sesi kembali ke mode Menunggu untuk persiapan babak berikutnya.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleResetToWaiting}
-                    disabled={savingSettings}
-                    className="px-5 py-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs sm:text-sm shadow transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>↺ Reset ke Mode Menunggu (Layar QR)</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Quick Controls Grid: Mode Manual, PIN & Timer Config */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2">
-            {/* Manual Status Buttons (Secondary) */}
-            <div className="lg:col-span-5">
-              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
-                Pilih Status Sesi Manual
-              </label>
-              <div className="grid grid-cols-3 gap-2 p-1.5 bg-slate-100 rounded-2xl">
+              {/* Segmented State Pill */}
+              <div className="mt-4 flex rounded-full bg-slate-100 p-1">
                 {(['WAITING', 'OPEN', 'CLOSED'] as const).map((st) => {
-                  const isActive = settings?.status === st;
-                  const activeClass =
-                    st === 'OPEN'
-                      ? 'bg-emerald-600 text-white shadow'
-                      : st === 'WAITING'
-                      ? 'bg-amber-500 text-white shadow'
-                      : 'bg-rose-600 text-white shadow';
+                  const isActive = currentStatus === st;
                   return (
                     <button
                       key={st}
                       type="button"
                       onClick={() => handleSetStatus(st)}
-                      className={`py-2.5 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                      disabled={savingSettings}
+                      className={`flex-1 rounded-full px-3 py-2 text-xs font-semibold transition cursor-pointer disabled:opacity-60 ${
                         isActive
-                          ? activeClass
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          ? 'bg-theme-primary text-white shadow'
+                          : 'text-slate-500 hover:text-slate-800'
                       }`}
                     >
                       {st}
@@ -966,163 +839,556 @@ export default function AdminDashboardPage() {
                   );
                 })}
               </div>
+
+              <div className="mt-3.5 flex items-center gap-2 text-xs text-slate-500">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    currentStatus === 'OPEN'
+                      ? 'bg-green-500 pulse-dot'
+                      : currentStatus === 'WAITING'
+                      ? 'bg-amber-500'
+                      : 'bg-rose-500'
+                  }`}
+                />
+                <span>
+                  {currentStatus === 'OPEN'
+                    ? 'Session is live and accepting votes'
+                    : currentStatus === 'WAITING'
+                    ? 'Stage displays QR code only (Waiting)'
+                    : 'Voting closed — winners revealed on stage'}
+                </span>
+              </div>
             </div>
 
-            {/* PIN Control */}
-            <div className="lg:col-span-7 flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
-              <div className="flex items-center gap-3">
+            {/* Mission Control Contextual Action */}
+            <div className="mt-5 pt-4 border-t border-slate-100">
+              {currentStatus === 'WAITING' && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[1, 2, 3, 5, 10].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          setTimerMinutes(m);
+                          handleSaveSettings({ timer_minutes: m }, `Timer set to ${m} minutes`);
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                          timerMinutes === m
+                            ? 'border-theme-primary bg-theme-soft text-theme-primary'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        {m}m
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleStartVoting}
+                    disabled={savingSettings}
+                    className="w-full min-h-[44px] rounded-full bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white shadow-sm transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Buka Sesi Voting ({timerMinutes} Menit)</span>
+                  </button>
+                </div>
+              )}
+
+              {currentStatus === 'OPEN' && (
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={handleFinishVotingNow}
+                    disabled={savingSettings}
+                    className="w-full min-h-[44px] rounded-full bg-rose-600 hover:bg-rose-700 text-xs font-semibold text-white shadow-sm transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Selesaikan Voting Sekarang (Finish)</span>
+                  </button>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500 font-medium">Perpanjang waktu:</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleExtendTimer(1)}
+                        className="px-3 py-1 rounded-full border border-slate-200 hover:border-theme-primary hover:text-theme-primary text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> 1m
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExtendTimer(2)}
+                        className="px-3 py-1 rounded-full border border-slate-200 hover:border-theme-primary hover:text-theme-primary text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> 2m
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {currentStatus === 'CLOSED' && (
+                <button
+                  type="button"
+                  onClick={handleResetToWaiting}
+                  disabled={savingSettings}
+                  className="w-full min-h-[44px] rounded-full border border-slate-200 bg-white hover:border-theme-primary hover:text-theme-primary text-xs font-semibold text-slate-700 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset ke Mode Menunggu (QR Stage)</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Column 2: Room Configuration */}
+          <div className="p-6 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Room Configuration
+                </p>
                 <button
                   type="button"
                   onClick={handleToggleRequirePin}
-                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-                    settings?.require_pin ? 'bg-theme-primary' : 'bg-slate-300'
-                  }`}
+                  className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer"
                 >
+                  <span>Require PIN</span>
                   <span
-                    className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                      settings?.require_pin ? 'translate-x-5' : 'translate-x-0'
+                    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${
+                      settings?.require_pin ? 'bg-theme-primary' : 'bg-slate-300'
                     }`}
-                  />
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition mt-0.5 ${
+                        settings?.require_pin ? 'translate-x-4.5 ml-0.5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </span>
                 </button>
+              </div>
+
+              <div className="mt-3 flex items-end justify-between gap-3">
+                <div className={!settings?.require_pin ? 'opacity-40' : ''}>
+                  <p className="text-xs text-slate-500">Room PIN</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={roomPin}
+                      disabled={!settings?.require_pin}
+                      onChange={(e) => setRoomPin(e.target.value.replace(/\D/g, ''))}
+                      className="tabular w-28 rounded-[12px] border border-transparent hover:border-slate-200 focus:border-theme-primary focus:bg-white bg-transparent text-3xl font-bold tracking-[0.18em] text-[#0F172A] outline-none px-1 transition"
+                      aria-label="Room PIN"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {roomPin !== settings?.room_pin && (
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSettings({ room_pin: roomPin }, 'Room PIN updated')}
+                      className="rounded-full bg-theme-primary px-3 py-2 text-xs font-semibold text-white hover:bg-theme-dark transition cursor-pointer"
+                    >
+                      Save
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCopyPin}
+                    className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-theme-primary transition hover:border-theme-primary cursor-pointer"
+                  >
+                    {copiedPin ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedPin ? 'Copied' : 'Copy PIN'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+              <label htmlFor="admin-timer-input" className="text-xs text-slate-500 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
+                <span>{currentStatus === 'OPEN' ? 'Remaining time' : 'Duration (minutes)'}</span>
+              </label>
+
+              {currentStatus === 'OPEN' ? (
+                <div className="tabular h-10 min-w-[7rem] rounded-[15px] border border-emerald-200 bg-emerald-50 px-3 flex items-center justify-center text-sm font-bold text-emerald-700">
+                  {formatTimerString(remainingSeconds)}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="admin-timer-input"
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={timerMinutes}
+                    onChange={(e) =>
+                      setTimerMinutes(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    }
+                    onBlur={() => handleSaveSettings({ timer_minutes: timerMinutes })}
+                    className="tabular h-10 w-20 rounded-[15px] border border-slate-200 px-3 text-center text-sm font-semibold outline-none focus:border-theme-primary focus:shadow-[0_0_0_4px_rgba(0,111,214,0.10)]"
+                  />
+                  <span className="text-xs text-slate-400 font-medium">min</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Column 3: Metrics & Health */}
+          <div className="p-6 flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                Metrics &amp; Health
+              </p>
+
+              <div className="mt-3 flex items-end justify-between">
                 <div>
-                  <p className="text-xs font-extrabold text-slate-800">Keamanan PIN Ruangan</p>
-                  <p className="text-[11px] text-slate-500">
-                    {settings?.require_pin ? 'Peserta wajib ketik PIN setelah scan QR' : 'Nonaktif (Langsung vote)'}
+                  <p className="text-xs text-slate-500">Total votes</p>
+                  <p className="tabular mt-1 text-3xl font-bold text-[#0F172A]">
+                    {totalVotes.toLocaleString()}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-slate-500">Live nominees</p>
+                  <p className="tabular mt-1 text-xl font-bold text-theme-primary">
+                    {activeNomineesCount}
+                    <span className="text-sm font-medium text-slate-400">/{candidates.length}</span>
                   </p>
                 </div>
               </div>
+            </div>
 
-              <div
-                className={`flex items-center gap-1.5 ml-auto ${
-                  !settings?.require_pin ? 'opacity-40 pointer-events-none' : ''
-                }`}
-              >
-                <input
-                  type="text"
-                  maxLength={4}
-                  value={roomPin}
-                  onChange={(e) => setRoomPin(e.target.value.replace(/\D/g, ''))}
-                  className="w-20 px-2.5 py-2 rounded-xl border border-slate-300 text-sm font-mono font-extrabold tracking-widest text-center text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleSaveSettings({ room_pin: roomPin })}
-                  className="px-3 py-2 rounded-xl bg-theme-primary text-white text-xs font-bold hover:opacity-90 transition cursor-pointer"
+            <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-2">
+              <span className="text-xs text-slate-500">
+                Spam protection ({resultsData?.anomalies?.unique_user_agents || 0} devices)
+              </span>
+              {duplicateIpCount > 0 ? (
+                <span
+                  title="Shared venue Wi-Fi NAT detected; browser cookies prevent double voting"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700"
                 >
-                  Simpan PIN
-                </button>
-              </div>
+                  <span>!</span> Shared Wi-Fi ({duplicateIpCount})
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                  <span>✓</span> Healthy
+                </span>
+              )}
             </div>
           </div>
+        </section>
 
-          {/* Event Identity Fields Accordion/Form */}
-          <div className="pt-5 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-3">
+        {/* SECTION 2: EVENT IDENTITY SETUP (White-label, protected from polling reset) */}
+        <section className="rounded-[24px] bg-white p-6 shadow-[0_14px_38px_rgba(15,23,42,0.07),0_2px_8px_rgba(15,23,42,0.03)]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-theme-primary">
+                White-Label Setup
+              </p>
+              <h2 className="mt-1 text-base font-bold tracking-tight text-[#0F172A]">
+                Event Identity &amp; Labels
+              </h2>
+            </div>
+            <button
+              type="button"
+              disabled={savingSettings}
+              onClick={() => handleSaveSettings(undefined, 'Event identity updated!')}
+              className="rounded-full bg-[#0F172A] hover:bg-slate-800 px-5 py-2.5 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Simpan Identitas</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">
+                Event Title
+              </label>
+              <input
+                type="text"
+                value={eventTitle}
+                onChange={(e) => setEventTitle(e.target.value)}
+                placeholder="Live Event Voting"
+                className="h-11 w-full rounded-[15px] border border-slate-200 bg-white px-3.5 text-sm font-medium text-[#0F172A] outline-none transition focus:border-theme-primary focus:shadow-[0_0_0_4px_rgba(0,111,214,0.10)]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">
+                Event Subtitle / Award Category
+              </label>
+              <input
+                type="text"
+                value={eventSubtitle}
+                onChange={(e) => setEventSubtitle(e.target.value)}
+                placeholder="Audience Choice Award"
+                className="h-11 w-full rounded-[15px] border border-slate-200 bg-white px-3.5 text-sm font-medium text-[#0F172A] outline-none transition focus:border-theme-primary focus:shadow-[0_0_0_4px_rgba(0,111,214,0.10)]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">
+                Organizer Label
+              </label>
+              <input
+                type="text"
+                value={organizerLabel}
+                onChange={(e) => setOrganizerLabel(e.target.value)}
+                placeholder="Event Committee"
+                className="h-11 w-full rounded-[15px] border border-slate-200 bg-white px-3.5 text-sm font-medium text-[#0F172A] outline-none transition focus:border-theme-primary focus:shadow-[0_0_0_4px_rgba(0,111,214,0.10)]"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION 3: 2-COLUMN WORKSPACE (Live Vote Standings + Nominees Management) */}
+        <section className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-7 items-start">
+          {/* LEFT: LIVE VOTE STANDINGS */}
+          <div className="rounded-[24px] bg-white p-6 sm:p-7 shadow-[0_14px_38px_rgba(15,23,42,0.07),0_2px_8px_rgba(15,23,42,0.03)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                  Identitas & Judul Acara (White-label)
-                </h4>
-                <p className="text-[11px] text-slate-500">
-                  Ubah judul, kategori nominasi, dan label penyelenggara. Teks tidak akan ter-reset saat Anda mengetik.
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-theme-primary">
+                  Live Results
                 </p>
+                <h2 className="mt-2 text-2xl font-bold tracking-tight text-[#0F172A]">
+                  Live Vote Standings
+                </h2>
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-slate-50 px-3.5 py-2 text-xs font-medium text-slate-500">
+                <span className="pulse-dot h-2 w-2 rounded-full bg-green-500" />
+                <span>Auto-refreshing</span>
+              </div>
+            </div>
+
+            {!resultsData?.candidates || resultsData.candidates.length === 0 ? (
+              <div className="py-20 text-center text-sm text-slate-400">
+                <BarChart3 className="w-8 h-8 mx-auto text-slate-300" />
+                <p className="mt-3 font-medium">Waiting for nominees &amp; first vote...</p>
+              </div>
+            ) : (
+              <div className="mt-8 space-y-6">
+                {resultsData.candidates.map((c, idx) => {
+                  const votes = c.votes || 0;
+                  const pct =
+                    totalVotes > 0 ? Math.round((votes / totalVotes) * 1000) / 10 : 0;
+                  return (
+                    <div key={c.id}>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-theme-soft text-xs font-bold text-theme-primary">
+                            #{String(idx + 1).padStart(2, '0')}
+                          </span>
+                          <span className="truncate text-sm font-semibold text-[#0F172A]">
+                            {c.name}
+                          </span>
+                          <span className="hidden sm:inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 shrink-0">
+                            No. {String(c.number).padStart(2, '0')}
+                          </span>
+                          {!c.is_active && (
+                            <span className="text-[10px] font-semibold text-slate-400 shrink-0">
+                              (Draft)
+                            </span>
+                          )}
+                        </div>
+                        <div className="tabular flex items-center gap-3 text-xs font-semibold text-slate-500 shrink-0">
+                          <span>{votes} votes</span>
+                          <span className="w-10 text-right text-theme-primary">{pct}%</span>
+                        </div>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="bar-grow h-full rounded-full bg-theme-primary"
+                          style={
+                            {
+                              '--width': `${Math.max(pct, votes > 0 ? 2 : 0)}%`,
+                              animationDelay: `${Math.min(idx, 8) * 120}ms`,
+                            } as React.CSSProperties
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: NOMINEES MANAGEMENT */}
+          <div className="flex min-h-[540px] flex-col rounded-[24px] bg-white p-6 sm:p-7 shadow-[0_14px_38px_rgba(15,23,42,0.07),0_2px_8px_rgba(15,23,42,0.03)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-theme-primary">
+                  Session Content
+                </p>
+                <h2 className="mt-2 text-2xl font-bold tracking-tight text-[#0F172A]">
+                  Nominees Management
+                </h2>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">
+                  {activeNomineesCount} active
+                </span>
+                {candidates.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClearAllModal(true)}
+                    className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 transition cursor-pointer"
+                    title="Clear all nominees"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {candidates.length === 0 ? (
+              <div className="mt-6 flex-1 flex flex-col items-center justify-center rounded-[15px] border-2 border-dashed border-slate-200 bg-slate-50/70 p-8 text-center">
+                <Camera className="w-8 h-8 text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-700">No nominees yet</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                  Click &ldquo;Add Nominee&rdquo; below to snap a live photo or upload from gallery.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-6 flex-1 space-y-2.5 overflow-y-auto max-h-[460px] pr-1 gallery-scroll">
+                {candidates.map((cand) => (
+                  <div
+                    key={cand.id}
+                    className={`group flex items-center gap-3 rounded-[15px] border p-3 transition ${
+                      cand.is_active
+                        ? 'border-slate-100 bg-white hover:border-slate-200'
+                        : 'border-dashed border-slate-200 bg-slate-50/80 opacity-80'
+                    }`}
+                  >
+                    <div className="relative w-11 aspect-[4/5] rounded-[10px] overflow-hidden shrink-0 bg-slate-100 border border-slate-200/70">
+                      <CandidateMedia
+                        photoData={cand.photo_data}
+                        name={cand.name}
+                        number={cand.number}
+                      />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 tabular">
+                          #{String(cand.number).padStart(2, '0')}
+                        </span>
+                        <p className="truncate text-sm font-semibold text-[#0F172A]">
+                          {cand.name}
+                        </p>
+                      </div>
+                      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex rounded-full bg-theme-soft px-2 py-0.5 text-[10px] font-semibold text-theme-primary">
+                          {cand.category}
+                        </span>
+                        {cand.costume_theme && (
+                          <span className="text-[11px] text-slate-400 truncate max-w-[120px]">
+                            {cand.costume_theme}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleCandidateActive(cand)}
+                      aria-label="Toggle nominee status"
+                      className={`rounded-full px-2.5 py-1.5 text-[10px] font-semibold transition cursor-pointer shrink-0 ${
+                        cand.is_active
+                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      }`}
+                    >
+                      {cand.is_active ? 'Active' : 'Draft'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(cand)}
+                      aria-label="Edit nominee"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-50 hover:text-theme-primary cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDeletingCand(cand)}
+                      aria-label="Delete nominee"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-50 hover:text-red-600 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="mt-5 flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-theme-primary text-sm font-semibold text-white shadow-[0_7px_16px_rgba(0,111,214,0.22)] transition hover:bg-theme-dark active:scale-[0.98] cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Nominee</span>
+            </button>
+          </div>
+        </section>
+      </main>
+
+      {/* MODAL 1: ADD NOMINEE (Quick Nomination Capture with WebRTC & Compression) */}
+      {showAddModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
+          onClick={() => !submittingAdd && setShowAddModal(false)}
+        >
+          <div
+            className="bg-white rounded-[24px] max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-theme-primary">
+                  Quick Capture
+                </p>
+                <h3 className="text-lg font-bold text-[#0F172A]">Add New Nominee</h3>
               </div>
               <button
                 type="button"
-                disabled={savingSettings}
-                onClick={() => handleSaveSettings()}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                onClick={() => setShowAddModal(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Simpan Identitas Acara</span>
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Event Title (Judul Acara)
-                </label>
-                <input
-                  type="text"
-                  value={eventTitle}
-                  onChange={(e) => setEventTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Contoh: Malam Apresiasi Seni 2026"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Event Subtitle / Award Category
-                </label>
-                <input
-                  type="text"
-                  value={eventSubtitle}
-                  onChange={(e) => setEventSubtitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Contoh: Best Performance Award"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Organizer Label (Penyelenggara)
-                </label>
-                <input
-                  type="text"
-                  value={organizerLabel}
-                  onChange={(e) => setOrganizerLabel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Contoh: Panitia Acara / Event Committee"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 2: 2-COLUMN NOMINATIONS & LIVE RECAP */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
-          {/* LEFT COLUMN: QUICK NOMINATION CAPTURE */}
-          <div className="lg:col-span-5 bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm">
-            <div className="mb-4">
-              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                <span className="w-2.5 h-6 rounded-full bg-theme-primary" />
-                Quick Nomination Capture
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Snap contestant photos on stage and publish instantly to voter phones.
-              </p>
-            </div>
-
             <form onSubmit={handleQuickAddSubmit} className="space-y-4">
-              {/* Photo Input (WebRTC Camera + File Upload) */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wide mb-2">
-                  1. Nominee Photo (Auto-Crop 4:5 & WebP)
+                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                  Nominee Photo (Auto-Crop 4:5 &amp; WebP)
                 </label>
 
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => openCamera('add')}
-                    className="flex flex-col items-center justify-center gap-1.5 py-4 px-3 rounded-2xl bg-theme-soft hover:bg-theme-soft-strong border-2 border-theme-soft text-theme-dark transition active:scale-[0.98] cursor-pointer"
+                    className="flex flex-col items-center justify-center gap-1.5 py-4 px-3 rounded-[15px] bg-theme-soft hover:bg-theme-soft-strong border border-theme-primary/20 text-theme-dark transition active:scale-[0.98] cursor-pointer"
                   >
-                    <span className="w-10 h-10 rounded-xl bg-theme-primary text-white flex items-center justify-center shadow-md">
+                    <span className="w-10 h-10 rounded-full bg-theme-primary text-white flex items-center justify-center shadow-md">
                       <Camera className="w-5 h-5" />
                     </span>
-                    <span className="text-xs font-extrabold text-center leading-tight">
-                      Open Live Camera
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-medium">Venue camera</span>
+                    <span className="text-xs font-semibold">Open Live Camera</span>
+                    <span className="text-[10px] text-slate-500">Venue camera</span>
                   </button>
 
-                  <label className="flex flex-col items-center justify-center gap-1.5 py-4 px-3 rounded-2xl bg-slate-50 hover:bg-slate-100 border-2 border-dashed border-slate-300 text-slate-700 transition active:scale-[0.98] cursor-pointer">
-                    <span className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center shadow-sm">
+                  <label className="flex flex-col items-center justify-center gap-1.5 py-4 px-3 rounded-[15px] bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 text-slate-700 transition active:scale-[0.98] cursor-pointer">
+                    <span className="w-10 h-10 rounded-full bg-white border border-slate-200 text-slate-700 flex items-center justify-center shadow-sm">
                       <ImageIcon className="w-5 h-5" />
                     </span>
-                    <span className="text-xs font-extrabold text-center leading-tight">
-                      Upload from Gallery
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-medium">Auto-compress</span>
+                    <span className="text-xs font-semibold">Upload Gallery</span>
+                    <span className="text-[10px] text-slate-500">Auto-compress</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1132,10 +1398,9 @@ export default function AdminDashboardPage() {
                   </label>
                 </div>
 
-                {/* Cropped Photo Preview */}
                 {addPhotoDataUrl && (
-                  <div className="mt-3 p-3 rounded-2xl bg-slate-50 border border-slate-200 animate-fade-up flex items-center gap-3">
-                    <div className="w-16 aspect-[4/5] rounded-xl overflow-hidden border border-slate-200 bg-slate-200 shrink-0">
+                  <div className="mt-3 p-3 rounded-[15px] bg-slate-50 border border-slate-200 animate-fade-up flex items-center gap-3">
+                    <div className="w-14 aspect-[4/5] rounded-[10px] overflow-hidden border border-slate-200 bg-slate-200 shrink-0">
                       <img
                         src={addPhotoDataUrl}
                         alt="Nominee preview"
@@ -1143,14 +1408,14 @@ export default function AdminDashboardPage() {
                       />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[11px] font-extrabold">
-                        {addCompressBadge || 'Ready ⚡'}
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
+                        {addCompressBadge || 'Ready'}
                       </span>
                       <div className="flex items-center gap-2 mt-2">
                         <button
                           type="button"
                           onClick={() => openCamera('add')}
-                          className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-bold text-slate-700 cursor-pointer"
+                          className="px-3 py-1 rounded-full bg-white border border-slate-200 text-[11px] font-semibold text-slate-700 cursor-pointer"
                         >
                           Retake
                         </button>
@@ -1160,7 +1425,7 @@ export default function AdminDashboardPage() {
                             setAddPhotoDataUrl(null);
                             setAddCompressBadge(null);
                           }}
-                          className="px-2.5 py-1 rounded-lg text-rose-600 hover:bg-rose-50 text-[11px] font-bold cursor-pointer"
+                          className="px-3 py-1 rounded-full text-rose-600 hover:bg-rose-50 text-[11px] font-semibold cursor-pointer"
                         >
                           Remove
                         </button>
@@ -1170,10 +1435,9 @@ export default function AdminDashboardPage() {
                 )}
               </div>
 
-              {/* Number and Name */}
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-4">
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     No.
                   </label>
                   <input
@@ -1181,11 +1445,11 @@ export default function AdminDashboardPage() {
                     required
                     value={addNumber}
                     onChange={(e) => setAddNumber(e.target.value)}
-                    className="w-full px-3 py-3 rounded-xl border border-slate-300 bg-white text-base font-extrabold font-mono text-center text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="tabular w-full h-11 px-3 rounded-[15px] border border-slate-200 bg-white text-base font-bold text-center text-[#0F172A] outline-none focus:border-theme-primary"
                   />
                 </div>
                 <div className="col-span-8">
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     Name / Callout <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1193,56 +1457,50 @@ export default function AdminDashboardPage() {
                     required
                     value={addName}
                     onChange={(e) => setAddName(e.target.value)}
-                    placeholder="e.g. Alex Johnson"
-                    className="w-full px-3.5 py-3 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. Alex Morgan"
+                    className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 bg-white text-sm font-medium text-[#0F172A] outline-none focus:border-theme-primary"
                   />
                 </div>
               </div>
 
-              {/* Category Chips */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Category Chip
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {CATEGORY_PRESETS.map((cat) => {
-                    const active = addCategory === cat;
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setAddCategory(cat)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                          active
-                            ? 'bg-theme-primary text-white border-theme-primary shadow-sm'
-                            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    );
-                  })}
+                  {CATEGORY_PRESETS.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setAddCategory(cat)}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${
+                        addCategory === cat
+                          ? 'bg-theme-primary text-white border-theme-primary shadow-sm'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Theme / Description */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Costume / Performance Theme <span className="text-slate-400">(Optional)</span>
                 </label>
                 <input
                   type="text"
                   value={addTheme}
                   onChange={(e) => setAddTheme(e.target.value)}
-                  placeholder="e.g. Cyberpunk Warrior, Classic Glamour..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. Neon Horizon, Classic Glamour..."
+                  className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 bg-white text-sm text-[#0F172A] outline-none focus:border-theme-primary"
                 />
               </div>
 
-              {/* Draft Toggle */}
-              <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+              <div className="flex items-center justify-between px-3.5 py-2.5 rounded-[15px] bg-slate-50 border border-slate-200/80">
                 <div className="text-xs">
-                  <p className="font-bold text-slate-800">Save as Draft</p>
+                  <p className="font-semibold text-slate-800">Save as Draft</p>
                   <p className="text-[11px] text-slate-500">Hide from voters until published.</p>
                 </div>
                 <input
@@ -1253,11 +1511,10 @@ export default function AdminDashboardPage() {
                 />
               </div>
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={submittingAdd}
-                className="w-full py-4 px-5 rounded-2xl btn-primary text-sm font-extrabold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="w-full min-h-[50px] rounded-full bg-theme-primary hover:bg-theme-dark text-sm font-semibold text-white shadow-[0_7px_16px_rgba(0,111,214,0.22)] flex items-center justify-center gap-2 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
               >
                 <Zap className="w-4 h-4" />
                 <span>
@@ -1270,278 +1527,51 @@ export default function AdminDashboardPage() {
               </button>
             </form>
           </div>
-
-          {/* RIGHT COLUMN: NOMINEE CRUD LIST & RECAP */}
-          <div className="lg:col-span-7 space-y-6">
-            
-            {/* Candidate CRUD List */}
-            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                    <span className="w-2.5 h-6 rounded-full bg-theme-primary" />
-                    Nominee Management
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Edit details, retake photos, toggle publish state, or remove.
-                  </p>
-                </div>
-                <span className="px-3 py-1 rounded-full bg-theme-soft text-theme-primary text-xs font-extrabold">
-                  {candidates.length} Nominees
-                </span>
-              </div>
-
-              {candidates.length === 0 ? (
-                <div className="py-10 text-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50">
-                  <p className="text-sm font-bold text-slate-700">No nominees registered yet</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Use the Quick Nomination form on the left to capture your first contestant.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {candidates.map((cand) => (
-                    <div
-                      key={cand.id}
-                      className={`p-3 rounded-2xl border transition flex items-center gap-3 ${
-                        cand.is_active
-                          ? 'bg-white border-slate-200 hover:border-theme-accent'
-                          : 'bg-slate-50/90 border-dashed border-slate-300 opacity-80'
-                      }`}
-                    >
-                      {/* Thumbnail */}
-                      <div className="relative w-14 sm:w-16 aspect-[4/5] rounded-xl overflow-hidden shrink-0 border border-slate-200 bg-slate-100">
-                        <CandidateMedia
-                          photoData={cand.photo_data}
-                          name={cand.name}
-                          number={cand.number}
-                        />
-                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-slate-900/80 text-white text-[10px] font-extrabold">
-                          {String(cand.number).padStart(2, '0')}
-                        </span>
-                      </div>
-
-                      {/* Info */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                              cand.is_active
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-slate-200 text-slate-600'
-                            }`}
-                          >
-                            {cand.is_active ? '● Live' : '○ Draft'}
-                          </span>
-                          {cand.category && (
-                            <span className="px-2 py-0.5 rounded-full bg-theme-soft text-theme-primary text-[10px] font-bold">
-                              {cand.category}
-                            </span>
-                          )}
-                          <span className="text-[11px] font-extrabold text-slate-700 ml-auto sm:ml-0">
-                            {cand.votes || 0} votes
-                          </span>
-                        </div>
-                        <h4 className="text-sm font-extrabold text-slate-900 truncate">
-                          {cand.name}
-                        </h4>
-                        {cand.costume_theme && (
-                          <p className="text-xs text-slate-500 truncate">
-                            {cand.costume_theme}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleCandidateActive(cand)}
-                          className={`p-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                            cand.is_active
-                              ? 'bg-slate-50 hover:bg-amber-50 text-slate-600 hover:text-amber-700 border-slate-200'
-                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                          }`}
-                          title={cand.is_active ? 'Hide (Set to Draft)' : 'Publish Live'}
-                        >
-                          {cand.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(cand)}
-                          className="p-2 rounded-xl bg-slate-50 hover:bg-theme-soft text-slate-600 hover:text-theme-primary border border-slate-200 transition cursor-pointer"
-                          title="Edit nominee"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingCand(cand)}
-                          className="p-2 rounded-xl bg-slate-50 hover:bg-rose-50 text-slate-500 hover:text-rose-600 border border-slate-200 transition cursor-pointer"
-                          title="Delete nominee"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Danger Zone Actions */}
-              <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowClearAllModal(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 text-xs font-bold transition cursor-pointer"
-                >
-                  Clear All Nominees
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowResetVotesModal(true)}
-                  className="px-3.5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition cursor-pointer"
-                >
-                  Reset Trial Votes
-                </button>
-              </div>
-            </div>
-
-            {/* Live Rekap Suara (Bar Chart & Anomaly Indicators) */}
-            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                    <span className="w-2.5 h-6 rounded-full bg-theme-primary" />
-                    Live Voting Results
-                  </h3>
-                  <p className="text-xs text-slate-500">Auto-polls every 5 seconds.</p>
-                </div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-extrabold border border-emerald-200">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  {totalVotes.toLocaleString()} Votes
-                </span>
-              </div>
-
-              {/* Bar Chart */}
-              <div className="space-y-3.5">
-                {resultsData?.candidates?.map((c, idx) => {
-                  const votes = c.votes || 0;
-                  const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 1000) / 10 : 0;
-                  return (
-                    <div key={c.id}>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-6 h-6 rounded-lg border text-[11px] font-extrabold flex items-center justify-center shrink-0 bg-slate-100 text-slate-700 border-slate-200">
-                            #{idx + 1}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-theme-soft text-theme-primary text-[11px] font-extrabold shrink-0">
-                            No. {String(c.number).padStart(2, '0')}
-                          </span>
-                          <span className="text-sm font-bold text-slate-900 truncate">
-                            {c.name}
-                          </span>
-                          {!c.is_active && (
-                            <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                              (Draft)
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-baseline gap-1 shrink-0">
-                          <span className="text-sm font-extrabold text-slate-900">{votes}</span>
-                          <span className="text-xs font-semibold text-slate-400">({pct}%)</span>
-                        </div>
-                      </div>
-                      <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-700 ease-out"
-                          style={{
-                            width: `${Math.max(pct, votes > 0 ? 3 : 0)}%`,
-                            background:
-                              'linear-gradient(90deg, var(--color-primary), var(--color-accent))',
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Anomaly & Device Analytics */}
-              <div className="pt-4 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                    Network & Fraud Indicators
-                  </p>
-                  <span className="text-xs font-bold text-slate-500">
-                    {resultsData?.anomalies?.unique_user_agents || 0} Unique Device Types
-                  </span>
-                </div>
-
-                {resultsData?.anomalies?.duplicate_ips &&
-                resultsData.anomalies.duplicate_ips.length > 0 ? (
-                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-xs">
-                    <p className="font-bold text-amber-900 mb-1">
-                      Venue Wi-Fi / NAT Multi-Vote Activity:
-                    </p>
-                    <p className="text-[11px] text-amber-800 leading-relaxed">
-                      Several votes originate from the same external IP (common on venue shared Wi-Fi). Device-level unique tokens and cookies protect against repeat votes on individual devices.
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-400">
-                    No abnormal IP clustering detected.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* MODAL 1: EDIT CANDIDATE */}
+      {/* MODAL 2: EDIT CANDIDATE */}
       {editingCandidate && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
           onClick={() => !submittingEdit && setEditingCandidate(null)}
         >
           <div
-            className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-[24px] max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-extrabold text-slate-900">Edit Nominee Details</h3>
+              <h3 className="text-lg font-bold text-[#0F172A]">Edit Nominee Details</h3>
               <button
                 type="button"
                 onClick={() => setEditingCandidate(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 cursor-pointer"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-4">
-              {/* Photo & Retake */}
-              <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="w-16 aspect-[4/5] rounded-xl overflow-hidden bg-slate-200 shrink-0 border border-slate-200">
+              <div className="flex items-center gap-3.5 p-3 rounded-[15px] bg-slate-50 border border-slate-200">
+                <div className="w-16 aspect-[4/5] rounded-[12px] overflow-hidden bg-slate-200 shrink-0 border border-slate-200">
                   <CandidateMedia
                     photoData={editPhotoDataUrl}
                     name={editName}
                     number={editNumber}
                   />
                 </div>
-                <div className="flex-1 space-y-1.5">
-                  <p className="text-xs font-extrabold text-slate-800">Change Photo</p>
+                <div className="flex-1 space-y-2">
+                  <p className="text-xs font-semibold text-slate-800">Change Photo</p>
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
                       onClick={() => openCamera('edit')}
-                      className="px-2.5 py-1.5 rounded-xl bg-theme-primary text-white text-[11px] font-bold cursor-pointer"
+                      className="px-3 py-1.5 rounded-full bg-theme-primary text-white text-[11px] font-semibold cursor-pointer flex items-center gap-1"
                     >
-                      📷 Camera
+                      <Camera className="w-3 h-3" /> Camera
                     </button>
-                    <label className="px-2.5 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 text-[11px] font-bold cursor-pointer">
-                      🖼 Gallery
+                    <label className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 text-[11px] font-semibold cursor-pointer flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3" /> Gallery
                       <input
                         type="file"
                         accept="image/*"
@@ -1551,7 +1581,7 @@ export default function AdminDashboardPage() {
                     </label>
                   </div>
                   {editCompressBadge && (
-                    <p className="text-[11px] font-bold text-emerald-700">
+                    <p className="text-[11px] font-semibold text-emerald-700">
                       {editCompressBadge}
                     </p>
                   )}
@@ -1560,36 +1590,36 @@ export default function AdminDashboardPage() {
 
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-4">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">No.</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">No.</label>
                   <input
                     type="number"
                     required
                     value={editNumber}
                     onChange={(e) => setEditNumber(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-extrabold text-center"
+                    className="tabular w-full h-11 px-3 rounded-[15px] border border-slate-200 text-sm font-bold text-center outline-none focus:border-theme-primary"
                   />
                 </div>
                 <div className="col-span-8">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Name</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Name</label>
                   <input
                     type="text"
                     required
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold"
+                    className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 text-sm font-medium outline-none focus:border-theme-primary"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Category</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Category</label>
                 <div className="flex flex-wrap gap-2">
                   {CATEGORY_PRESETS.map((cat) => (
                     <button
                       key={cat}
                       type="button"
                       onClick={() => setEditCategory(cat)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${
                         editCategory === cat
                           ? 'bg-theme-primary text-white border-theme-primary'
                           : 'bg-white text-slate-600 border-slate-200'
@@ -1602,14 +1632,14 @@ export default function AdminDashboardPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Theme (Optional)
                 </label>
                 <input
                   type="text"
                   value={editTheme}
                   onChange={(e) => setEditTheme(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm"
+                  className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 text-sm outline-none focus:border-theme-primary"
                 />
               </div>
 
@@ -1617,14 +1647,14 @@ export default function AdminDashboardPage() {
                 <button
                   type="button"
                   onClick={() => setEditingCandidate(null)}
-                  className="py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-50"
+                  className="min-h-[46px] rounded-full border border-slate-200 text-slate-700 font-semibold text-xs cursor-pointer hover:bg-slate-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submittingEdit}
-                  className="py-3 rounded-xl btn-primary font-extrabold text-xs cursor-pointer disabled:opacity-50"
+                  className="min-h-[46px] rounded-full bg-theme-primary hover:bg-theme-dark text-white font-semibold text-xs cursor-pointer disabled:opacity-50"
                 >
                   {submittingEdit ? 'Saving...' : 'Save Changes'}
                 </button>
@@ -1634,19 +1664,19 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* MODAL 2: WEBRTC LIVE CAMERA VIEWFINDER */}
+      {/* MODAL 3: WEBRTC LIVE CAMERA VIEWFINDER (z-[60] to stack above Add/Edit Modals) */}
       {showCameraModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-slate-900 text-white rounded-3xl max-w-md w-full overflow-hidden border border-slate-700 shadow-2xl flex flex-col">
+        <div className="fixed inset-0 z-[60] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 text-white rounded-[24px] max-w-md w-full overflow-hidden border border-slate-700 shadow-2xl flex flex-col">
             <div className="px-4 py-3.5 flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-                <h3 className="text-sm font-extrabold">Live Stage Viewfinder</h3>
+                <h3 className="text-sm font-bold">Live Stage Viewfinder</h3>
               </div>
               <button
                 type="button"
                 onClick={closeCamera}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1661,29 +1691,26 @@ export default function AdminDashboardPage() {
                 className={`w-full h-full object-cover ${cameraError ? 'hidden' : 'block'}`}
               />
 
-              {/* 4:5 Guide Overlay */}
               {!cameraError && (
                 <div className="absolute inset-0 pointer-events-none">
                   <div className="absolute inset-5 border-2 border-white/35 rounded-2xl" />
-                  <span className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 backdrop-blur-sm text-[11px] font-bold text-white">
+                  <span className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-black/60 backdrop-blur-sm text-[11px] font-semibold text-white">
                     4:5 Portrait Frame • Auto-Compress
                   </span>
                 </div>
               )}
 
-              {/* Flash effect */}
               {cameraFlash && (
                 <div className="absolute inset-0 bg-white z-20 animate-flash pointer-events-none" />
               )}
 
-              {/* Fallback Box */}
               {cameraError && (
                 <div className="px-6 text-center max-w-xs">
-                  <p className="text-sm font-extrabold text-white">Web Camera Unavailable</p>
+                  <p className="text-sm font-bold text-white">Web Camera Unavailable</p>
                   <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
                     Browser camera permission was denied or device has no direct camera stream.
                   </p>
-                  <label className="mt-5 flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-theme-primary text-white text-xs font-extrabold cursor-pointer">
+                  <label className="mt-5 flex items-center justify-center gap-2 w-full py-3 px-4 rounded-full bg-theme-primary text-white text-xs font-semibold cursor-pointer">
                     <Camera className="w-4 h-4" />
                     <span>Open Phone Native Camera</span>
                     <input
@@ -1702,7 +1729,7 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={flipCamera}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
                 title="Switch Camera Facing"
               >
                 <FlipHorizontal className="w-4 h-4" />
@@ -1725,17 +1752,17 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* MODAL 3: DELETE CANDIDATE */}
+      {/* MODAL 4: DELETE CANDIDATE */}
       {deletingCand && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
           onClick={() => setDeletingCand(null)}
         >
           <div
-            className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center"
+            className="bg-white rounded-[24px] max-w-sm w-full p-6 shadow-2xl text-center"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-extrabold text-slate-900">Delete Nominee?</h3>
+            <h3 className="text-lg font-bold text-[#0F172A]">Delete Nominee?</h3>
             <p className="text-sm text-slate-600 mt-2">
               Are you sure you want to remove{' '}
               <strong>
@@ -1747,14 +1774,14 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={() => setDeletingCand(null)}
-                className="py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-50"
+                className="min-h-[44px] rounded-full border border-slate-200 text-slate-700 font-semibold text-xs cursor-pointer hover:bg-slate-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleDeleteCandidate}
-                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer"
+                className="min-h-[44px] rounded-full bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs cursor-pointer"
               >
                 Delete Nominee
               </button>
@@ -1763,25 +1790,25 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* MODAL 4: RESET TRIAL VOTES */}
+      {/* MODAL 5: RESET TRIAL VOTES */}
       {showResetVotesModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
           onClick={() => setShowResetVotesModal(false)}
         >
           <div
-            className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl"
+            className="bg-white rounded-[24px] max-w-sm w-full p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
-              <RotateCcw className="w-6 h-6" />
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
+              <RotateCcw className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900">Reset Trial Votes?</h3>
+            <h3 className="text-lg font-bold text-[#0F172A]">Reset Trial Votes?</h3>
             <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
               All vote counts will be returned to <strong>0</strong>. All candidate profiles will remain intact.
             </p>
             <div className="mt-4">
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Type <span className="font-mono text-rose-600">RESET</span> to confirm:
               </label>
               <input
@@ -1789,7 +1816,7 @@ export default function AdminDashboardPage() {
                 placeholder="RESET"
                 value={resetConfirmText}
                 onChange={(e) => setResetConfirmText(e.target.value.toUpperCase())}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-rose-500"
+                className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 text-sm font-mono font-bold uppercase outline-none focus:border-rose-500"
               />
             </div>
             <div className="mt-5 grid grid-cols-2 gap-2.5">
@@ -1799,7 +1826,7 @@ export default function AdminDashboardPage() {
                   setShowResetVotesModal(false);
                   setResetConfirmText('');
                 }}
-                className="py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-50"
+                className="min-h-[44px] rounded-full border border-slate-200 text-slate-700 font-semibold text-xs cursor-pointer hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -1807,7 +1834,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 disabled={resetConfirmText.trim().toUpperCase() !== 'RESET'}
                 onClick={handleExecuteResetVotes}
-                className="py-2.5 rounded-xl bg-rose-600 disabled:bg-rose-300 text-white font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
+                className="min-h-[44px] rounded-full bg-rose-600 disabled:bg-rose-300 text-white font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
               >
                 Reset Votes
               </button>
@@ -1816,25 +1843,25 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* MODAL 5: CLEAR ALL NOMINEES */}
+      {/* MODAL 6: CLEAR ALL NOMINEES */}
       {showClearAllModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-up"
           onClick={() => setShowClearAllModal(false)}
         >
           <div
-            className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl"
+            className="bg-white rounded-[24px] max-w-sm w-full p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
-              <AlertTriangle className="w-6 h-6" />
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-3">
+              <AlertTriangle className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900">Clear All Nominees?</h3>
+            <h3 className="text-lg font-bold text-[#0F172A]">Clear All Nominees?</h3>
             <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
               This will permanently delete all nominees and their votes so you can start fresh from <strong>No. 01</strong>.
             </p>
             <div className="mt-4">
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                 Type <span className="font-mono text-rose-600">CLEAR</span> to confirm:
               </label>
               <input
@@ -1842,7 +1869,7 @@ export default function AdminDashboardPage() {
                 placeholder="CLEAR"
                 value={clearConfirmText}
                 onChange={(e) => setClearConfirmText(e.target.value.toUpperCase())}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-rose-500"
+                className="w-full h-11 px-3.5 rounded-[15px] border border-slate-200 text-sm font-mono font-bold uppercase outline-none focus:border-rose-500"
               />
             </div>
             <div className="mt-5 grid grid-cols-2 gap-2.5">
@@ -1852,7 +1879,7 @@ export default function AdminDashboardPage() {
                   setShowClearAllModal(false);
                   setClearConfirmText('');
                 }}
-                className="py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-50"
+                className="min-h-[44px] rounded-full border border-slate-200 text-slate-700 font-semibold text-xs cursor-pointer hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -1860,7 +1887,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 disabled={clearConfirmText.trim().toUpperCase() !== 'CLEAR'}
                 onClick={handleExecuteClearAll}
-                className="py-2.5 rounded-xl bg-rose-600 disabled:bg-rose-300 text-white font-bold text-xs cursor-pointer disabled:cursor-not-allowed"
+                className="min-h-[44px] rounded-full bg-rose-600 disabled:bg-rose-300 text-white font-semibold text-xs cursor-pointer disabled:cursor-not-allowed"
               >
                 Clear Everything
               </button>
