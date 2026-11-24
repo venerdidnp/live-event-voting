@@ -32,6 +32,17 @@ export async function GET() {
 
     const settings = rows[0];
 
+    // Auto-close if timer expired
+    if (settings.status === 'OPEN' && settings.ends_at && new Date(settings.ends_at).getTime() <= Date.now()) {
+      await sql`
+        UPDATE event_settings
+        SET status = 'CLOSED', ends_at = NULL
+        WHERE id = 1
+      `;
+      settings.status = 'CLOSED';
+      settings.ends_at = null;
+    }
+
     // Check if voter has already voted via cookie
     const cookieStore = await cookies();
     const voterToken = cookieStore.get('voted_token')?.value;

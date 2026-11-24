@@ -32,7 +32,20 @@ export async function GET() {
       `;
     }
 
-    return NextResponse.json({ settings: rows[0] });
+    const settings = rows[0];
+
+    // Auto-close if timer expired
+    if (settings.status === 'OPEN' && settings.ends_at && new Date(settings.ends_at).getTime() <= Date.now()) {
+      await sql`
+        UPDATE event_settings
+        SET status = 'CLOSED', ends_at = NULL
+        WHERE id = 1
+      `;
+      settings.status = 'CLOSED';
+      settings.ends_at = null;
+    }
+
+    return NextResponse.json({ settings });
   } catch (error) {
     console.error('Error in GET /api/admin/settings:', error);
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
@@ -72,7 +85,24 @@ export async function PATCH(req: NextRequest) {
     const updatedRequirePin = require_pin !== undefined ? Boolean(require_pin) : (cur.require_pin ?? true);
     const updatedRoomPin = room_pin !== undefined ? String(room_pin).replace(/\D/g, '').slice(0, 10) : (cur.room_pin || '2026');
     const updatedTimer = timer_minutes !== undefined ? Math.max(1, parseInt(timer_minutes, 10) || 5) : (cur.timer_minutes || 5);
-    const updatedEndsAt = ends_at !== undefined ? ends_at : cur.ends_at;
+    
+    let updatedEndsAt = ends_at !== undefined ? ends_at : cur.ends_at;
+
+    // Handle timer extension
+    if (body.extend_minutes && cur.status === 'OPEN') {
+      const currentEnd = cur.ends_at ? new Date(cur.ends_at).getTime() : Date.now();
+      const base = currentEnd > Date.now() ? currentEnd : Date.now();
+      updatedEndsAt = new Date(base + Number(body.extend_minutes) * 60 * 1000).toISOString();
+    } else if (updatedStatus === 'OPEN') {
+      // If opening or switching to OPEN and ends_at not specified, set it based on timer_minutes
+      if (cur.status !== 'OPEN' || !cur.ends_at || ends_at === 'auto') {
+        updatedEndsAt = new Date(Date.now() + updatedTimer * 60 * 1000).toISOString();
+      }
+    } else if (updatedStatus === 'CLOSED' || updatedStatus === 'WAITING') {
+      if (ends_at === undefined) {
+        updatedEndsAt = null;
+      }
+    }
 
     const result = await sql`
       UPDATE event_settings

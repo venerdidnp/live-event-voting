@@ -19,6 +19,11 @@ import {
   CheckCircle2,
   X,
   FlipHorizontal,
+  Play,
+  Square,
+  Clock,
+  Plus,
+  Sparkles,
 } from 'lucide-react';
 
 interface Candidate {
@@ -76,6 +81,10 @@ export default function AdminDashboardPage() {
   const [roomPin, setRoomPin] = useState('2026');
   const [timerMinutes, setTimerMinutes] = useState(5);
   const [savingSettings, setSavingSettings] = useState(false);
+  const initialSettingsLoaded = useRef(false);
+
+  // Live timer countdown state in Admin
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
   // Quick-Add Nominee transient state
   const [addNumber, setAddNumber] = useState('');
@@ -153,11 +162,15 @@ export default function AdminDashboardPage() {
       if (settRes.ok) {
         const settData = await settRes.json();
         setSettings(settData.settings);
-        setEventTitle(settData.settings.event_title);
-        setEventSubtitle(settData.settings.event_subtitle);
-        setOrganizerLabel(settData.settings.organizer_label);
-        setRoomPin(settData.settings.room_pin);
-        setTimerMinutes(settData.settings.timer_minutes);
+        // Only set form values on initial load to avoid overwriting user edits while typing
+        if (!initialSettingsLoaded.current) {
+          setEventTitle(settData.settings.event_title || '');
+          setEventSubtitle(settData.settings.event_subtitle || '');
+          setOrganizerLabel(settData.settings.organizer_label || '');
+          setRoomPin(settData.settings.room_pin || '2026');
+          setTimerMinutes(settData.settings.timer_minutes || 5);
+          initialSettingsLoaded.current = true;
+        }
       }
 
       if (candRes.ok) {
@@ -190,6 +203,29 @@ export default function AdminDashboardPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated]);
+
+  // Live countdown ticker in Admin
+  useEffect(() => {
+    if (settings?.status === 'OPEN' && settings.ends_at) {
+      const updateTimer = () => {
+        const end = new Date(settings.ends_at!).getTime();
+        const diff = Math.max(0, Math.floor((end - Date.now()) / 1000));
+        setRemainingSeconds(diff);
+      };
+      updateTimer();
+      const interval = setInterval(updateTimer, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setRemainingSeconds(null);
+    }
+  }, [settings?.status, settings?.ends_at]);
+
+  const formatTimerString = (sec: number | null) => {
+    if (sec === null) return '--:--';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
 
   // Client-side Canvas 4:5 Crop & Compression (<80 KB WebP)
   const processImageCompression = (
@@ -342,7 +378,7 @@ export default function AdminDashboardPage() {
   };
 
   // Save Settings
-  const handleSaveSettings = async (partialUpdate?: Partial<EventSettings>) => {
+  const handleSaveSettings = async (partialUpdate?: Partial<EventSettings> & { extend_minutes?: number }) => {
     setSavingSettings(true);
     try {
       const payload = partialUpdate || {
@@ -362,20 +398,65 @@ export default function AdminDashboardPage() {
       if (res.ok) {
         const data = await res.json();
         setSettings(data.settings);
-        showToast('Event settings saved successfully!', 'success');
+        if (!partialUpdate) {
+          setEventTitle(data.settings.event_title || '');
+          setEventSubtitle(data.settings.event_subtitle || '');
+          setOrganizerLabel(data.settings.organizer_label || '');
+          setRoomPin(data.settings.room_pin || '2026');
+          setTimerMinutes(data.settings.timer_minutes || 5);
+        }
+        showToast('Pengaturan berhasil disimpan!', 'success');
       } else {
-        showToast('Failed to save settings.', 'error');
+        showToast('Gagal menyimpan pengaturan.', 'error');
       }
     } catch {
-      showToast('Network error while saving settings.', 'error');
+      showToast('Gagal terhubung ke server.', 'error');
     } finally {
       setSavingSettings(false);
     }
   };
 
+  // Dedicated Session Workflow Actions
+  const handleStartVoting = async () => {
+    await handleSaveSettings({
+      status: 'OPEN',
+      timer_minutes: timerMinutes,
+    });
+    showToast(`▶ Sesi voting dibuka (${timerMinutes} menit)!`, 'success');
+  };
+
+  const handleFinishVotingNow = async () => {
+    await handleSaveSettings({
+      status: 'CLOSED',
+      ends_at: null,
+    });
+    showToast('⏹ Sesi voting ditutup! Hasil pemenang tampil di layar display.', 'success');
+  };
+
+  const handleResetToWaiting = async () => {
+    await handleSaveSettings({
+      status: 'WAITING',
+      ends_at: null,
+    });
+    showToast('↺ Sesi direset ke mode Menunggu (Layar kembali ke QR Code).', 'info');
+  };
+
+  const handleExtendTimer = async (mins: number) => {
+    await handleSaveSettings({
+      extend_minutes: mins,
+    });
+    showToast(`+${mins} Menit ditambahkan ke waktu voting!`, 'success');
+  };
+
   // Status Switcher
   const handleSetStatus = async (status: 'WAITING' | 'OPEN' | 'CLOSED') => {
-    await handleSaveSettings({ status });
+    if (status === 'OPEN') {
+      await handleStartVoting();
+    } else if (status === 'CLOSED') {
+      await handleFinishVotingNow();
+    } else {
+      await handleResetToWaiting();
+    }
   };
 
   // Room PIN toggle
@@ -652,12 +733,13 @@ export default function AdminDashboardPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
         
         {/* SECTION 1: EVENT IDENTITY & SESSION STATUS CONTROL */}
-        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm">
+        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-sm space-y-6">
+          {/* Header Row */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-theme-soft text-theme-primary text-[11px] font-extrabold uppercase tracking-wider">
-                  ⚡ Live Session Status
+                  ⚡ Mission Control
                 </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
@@ -672,20 +754,20 @@ export default function AdminDashboardPage() {
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-                Event Setup & Session Switch
+                Kontrol Sesi Voting & Durasi
               </h2>
             </div>
 
-            {/* Quick Counters */}
+            {/* Quick Live Counters */}
             <div className="grid grid-cols-2 gap-3 shrink-0">
               <div className="px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200/70 text-center">
-                <p className="text-[10px] font-bold uppercase text-slate-500">Total Votes</p>
+                <p className="text-[10px] font-bold uppercase text-slate-500">Total Suara</p>
                 <p className="text-xl sm:text-2xl font-extrabold text-slate-900 leading-tight">
                   {totalVotes.toLocaleString()}
                 </p>
               </div>
               <div className="px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200/70 text-center">
-                <p className="text-[10px] font-bold uppercase text-slate-500">Live Nominees</p>
+                <p className="text-[10px] font-bold uppercase text-slate-500">Kandidat Aktif</p>
                 <p className="text-xl sm:text-2xl font-extrabold text-theme-primary leading-tight">
                   {activeNomineesCount}/{candidates.length}
                 </p>
@@ -693,12 +775,171 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Quick Controls Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-5">
-            {/* Status Switcher (3 Buttons) */}
+          {/* DYNAMIC MISSION CONTROL BANNER BY STATUS */}
+          {settings?.status === 'WAITING' && (
+            <div className="rounded-2xl bg-amber-50 border border-amber-200/80 p-5">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-900">
+                      Mode Menunggu — Layar Display Hanya Menampilkan QR Code
+                    </h3>
+                  </div>
+                  <p className="text-xs text-amber-800/90 leading-relaxed max-w-xl">
+                    Peserta yang scan QR code saat ini berada di ruang tunggu. Tentukan durasi voting di bawah, lalu klik <strong>Buka Sesi Voting Sekarang</strong> untuk memulai live voting secara serentak di layar display!
+                  </p>
+
+                  {/* Timer selection */}
+                  <div className="pt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-amber-950 mr-1 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" /> Durasi Voting:
+                    </span>
+                    {[1, 2, 3, 5, 10].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => {
+                          setTimerMinutes(m);
+                          handleSaveSettings({ timer_minutes: m });
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                          timerMinutes === m
+                            ? 'bg-amber-600 text-white shadow-sm'
+                            : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
+                        }`}
+                      >
+                        {m} Menit
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1 ml-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={timerMinutes}
+                        onChange={(e) => setTimerMinutes(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="w-16 px-2 py-1 text-xs font-bold text-center bg-white border border-amber-300 rounded-lg text-amber-950 focus:outline-none"
+                      />
+                      <span className="text-[11px] font-semibold text-amber-800">mnt</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleStartVoting}
+                    disabled={savingSettings}
+                    className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-extrabold text-sm sm:text-base shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Play className="w-5 h-5 fill-current" />
+                    <span>▶ Buka Sesi Voting Sekarang ({timerMinutes} Menit)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settings?.status === 'OPEN' && (
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-200/90 p-5 animate-fade-up">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-emerald-900">
+                      ⚡ Sesi Voting Sedang Berlangsung!
+                    </h3>
+                  </div>
+                  <p className="text-xs text-emerald-800 leading-relaxed max-w-xl">
+                    Layar display otomatis menampilkan live incoming vote & countdown timer. Jika voting sudah cukup atau waktu terlalu lama, Anda dapat langsung mengakhiri sesi kapan saja dengan tombol merah di kanan.
+                  </p>
+
+                  {/* Timer display & Extension */}
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <div className="px-4 py-2 rounded-xl bg-white border border-emerald-300 flex items-center gap-2 shadow-sm">
+                      <Clock className="w-4 h-4 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-800">Sisa Waktu:</span>
+                      <span className="font-mono text-xl sm:text-2xl font-extrabold text-emerald-950 tracking-tight">
+                        {formatTimerString(remainingSeconds)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-emerald-800">Perpanjang:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleExtendTimer(1)}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-xs font-bold text-emerald-900 shadow-sm transition cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> 1m
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExtendTimer(2)}
+                        className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 hover:bg-emerald-100 text-xs font-bold text-emerald-900 shadow-sm transition cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> 2m
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Big Emergency Finish Button */}
+                <div className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleFinishVotingNow}
+                    disabled={savingSettings}
+                    className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-extrabold text-sm sm:text-base shadow-xl shadow-rose-600/30 transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Square className="w-5 h-5 fill-current" />
+                    <span>⏹ Selesaikan Voting Sekarang (Finish & Reveal)</span>
+                  </button>
+                  <p className="text-[11px] text-center text-rose-800 mt-1 font-semibold">
+                    Layar display akan langsung menampilkan juara & confetti!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settings?.status === 'CLOSED' && (
+            <div className="rounded-2xl bg-slate-900 text-white p-5 animate-fade-up">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-sm font-extrabold uppercase tracking-wider text-amber-300">
+                      Voting Selesai — Layar Display Menampilkan Pemenang
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
+                    Tirai display telah terbuka dan pemenang Top 3 sedang ditampilkan di panggung utama. Anda dapat mereset sesi kembali ke mode Menunggu untuk persiapan babak berikutnya.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleResetToWaiting}
+                    disabled={savingSettings}
+                    className="px-5 py-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs sm:text-sm shadow transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>↺ Reset ke Mode Menunggu (Layar QR)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Controls Grid: Mode Manual, PIN & Timer Config */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-2">
+            {/* Manual Status Buttons (Secondary) */}
             <div className="lg:col-span-5">
               <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
-                Voting Session Mode
+                Pilih Status Sesi Manual
               </label>
               <div className="grid grid-cols-3 gap-2 p-1.5 bg-slate-100 rounded-2xl">
                 {(['WAITING', 'OPEN', 'CLOSED'] as const).map((st) => {
@@ -714,7 +955,7 @@ export default function AdminDashboardPage() {
                       key={st}
                       type="button"
                       onClick={() => handleSetStatus(st)}
-                      className={`py-3 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                      className={`py-2.5 px-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                         isActive
                           ? activeClass
                           : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -728,7 +969,7 @@ export default function AdminDashboardPage() {
             </div>
 
             {/* PIN Control */}
-            <div className="lg:col-span-4 flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="lg:col-span-7 flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -744,9 +985,9 @@ export default function AdminDashboardPage() {
                   />
                 </button>
                 <div>
-                  <p className="text-xs font-extrabold text-slate-800">Room PIN</p>
+                  <p className="text-xs font-extrabold text-slate-800">Keamanan PIN Ruangan</p>
                   <p className="text-[11px] text-slate-500">
-                    {settings?.require_pin ? 'Voters must input PIN' : 'Disabled (Direct vote)'}
+                    {settings?.require_pin ? 'Peserta wajib ketik PIN setelah scan QR' : 'Nonaktif (Langsung vote)'}
                   </p>
                 </div>
               </div>
@@ -768,85 +1009,70 @@ export default function AdminDashboardPage() {
                   onClick={() => handleSaveSettings({ room_pin: roomPin })}
                   className="px-3 py-2 rounded-xl bg-theme-primary text-white text-xs font-bold hover:opacity-90 transition cursor-pointer"
                 >
-                  Save
+                  Simpan PIN
                 </button>
-              </div>
-            </div>
-
-            {/* Timer Presets */}
-            <div className="lg:col-span-3 flex items-center justify-between gap-2 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
-              <div>
-                <p className="text-xs font-extrabold text-slate-800">Timer Preset</p>
-                <p className="text-[11px] text-slate-500">For stage screen</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {[3, 5, 10].map((min) => (
-                  <button
-                    key={min}
-                    type="button"
-                    onClick={() => {
-                      setTimerMinutes(min);
-                      handleSaveSettings({ timer_minutes: min });
-                    }}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      settings?.timer_minutes === min
-                        ? 'bg-theme-primary text-white shadow-sm'
-                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    {min}m
-                  </button>
-                ))}
               </div>
             </div>
           </div>
 
           {/* Event Identity Fields Accordion/Form */}
-          <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Event Title
-              </label>
-              <input
-                type="text"
-                value={eventTitle}
-                onChange={(e) => setEventTitle(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900"
-                placeholder="Live Event Voting"
-              />
+          <div className="pt-5 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Identitas & Judul Acara (White-label)
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Ubah judul, kategori nominasi, dan label penyelenggara. Teks tidak akan ter-reset saat Anda mengetik.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={savingSettings}
+                onClick={() => handleSaveSettings()}
+                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Simpan Identitas Acara</span>
+              </button>
             </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Event Subtitle / Award Category
-              </label>
-              <input
-                type="text"
-                value={eventSubtitle}
-                onChange={(e) => setEventSubtitle(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900"
-                placeholder="Audience Choice Award"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Organizer Label
-              </label>
-              <div className="flex gap-2">
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Event Title (Judul Acara)
+                </label>
+                <input
+                  type="text"
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Contoh: Malam Apresiasi Seni 2026"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Event Subtitle / Award Category
+                </label>
+                <input
+                  type="text"
+                  value={eventSubtitle}
+                  onChange={(e) => setEventSubtitle(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Contoh: Best Performance Award"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Organizer Label (Penyelenggara)
+                </label>
                 <input
                   type="text"
                   value={organizerLabel}
                   onChange={(e) => setOrganizerLabel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900"
-                  placeholder="Event Committee"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Contoh: Panitia Acara / Event Committee"
                 />
-                <button
-                  type="button"
-                  disabled={savingSettings}
-                  onClick={() => handleSaveSettings()}
-                  className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 shrink-0 cursor-pointer disabled:opacity-50"
-                >
-                  Update
-                </button>
               </div>
             </div>
           </div>
