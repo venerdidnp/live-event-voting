@@ -60,8 +60,12 @@ export default function VoterPage() {
   // PIN Gate state
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinDigits, setPinDigits] = useState(['', '', '', '']);
-  const [pinError, setPinError] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [pinShake, setPinShake] = useState(false);
+  const [verifyingPin, setVerifyingPin] = useState(false);
+  // True only after a successful POST /api/vote — prevents polling from resetting
+  // pinUnlocked while the user is actively browsing candidates with a valid PIN.
+  const pinServerVerified = useRef(false);
   const pinInputRefs = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -92,11 +96,26 @@ export default function VoterPage() {
         const data: StatusResponse = await res.json();
         setStatusData(data);
 
-        const localVoted = localStorage.getItem('voted_status');
-        if (data.has_voted || localVoted === 'true') {
+        // The server (voted_token cookie + votes table) is the single source of truth.
+        // A stale localStorage flag (cookie cleared, votes reset, new event) must never
+        // bypass the PIN gate, so drop it whenever the server says we haven't voted.
+        if (!data.has_voted) {
+          localStorage.removeItem('voted_status');
+        }
+
+        if (data.has_voted) {
+          pinServerVerified.current = true;
           setPinUnlocked(true);
         } else if (!data.require_pin) {
           setPinUnlocked(true);
+        } else {
+          // require_pin is ON and user hasn't voted yet.
+          // Only enforce the gate if the PIN hasn't been server-verified this session.
+          // This prevents polling from locking out a user who entered the correct PIN
+          // but hasn't submitted their vote yet.
+          if (!pinServerVerified.current) {
+            setPinUnlocked(false);
+          }
         }
 
         if (data.status === 'OPEN') {
@@ -154,7 +173,7 @@ export default function VoterPage() {
     const updated = [...pinDigits];
     updated[idx] = clean;
     setPinDigits(updated);
-    setPinError(false);
+    setPinError(null);
 
     if (clean && idx < 3) {
       pinInputRefs[idx + 1].current?.focus();
@@ -177,7 +196,7 @@ export default function VoterPage() {
       if (i < 4) updated[i] = d;
     });
     setPinDigits(updated);
-    setPinError(false);
+    setPinError(null);
     if (digits.length >= 4) {
       pinInputRefs[3].current?.focus();
     } else {
@@ -192,16 +211,48 @@ export default function VoterPage() {
 
   const handleVerifyPin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (verifyingPin) return;
     const entered = pinDigits.join('');
     if (entered.length < 4) {
-      setPinError(true);
+      setPinError('Please enter a valid 4-digit PIN.');
       triggerShake();
       return;
     }
 
-    // Unlock gallery locally; POST /api/vote rigorously validates room PIN server-side
-    setPinUnlocked(true);
-    showToast('PIN entered. Please select your favorite nominee!', 'success');
+    setVerifyingPin(true);
+    try {
+      const res = await fetch('/api/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room_pin: entered }),
+      });
+
+      if (res.ok) {
+        // PIN confirmed by the server; polling must not re-lock the gate now.
+        pinServerVerified.current = true;
+        setPinUnlocked(true);
+        showToast('PIN accepted. Please select your favorite nominee!', 'success');
+        return;
+      }
+
+      // Wrong PIN (or any failure): clear the boxes so the user can retype right away.
+      const data = await res.json().catch(() => ({}));
+      pinServerVerified.current = false;
+      setPinDigits(['', '', '', '']);
+      setPinError(
+        res.status === 401
+          ? 'Incorrect PIN. Please check the main stage screen and try again.'
+          : data.error || 'Could not verify the PIN. Please try again.'
+      );
+      triggerShake();
+      setTimeout(() => pinInputRefs[0].current?.focus(), 50);
+    } catch (err) {
+      console.error('PIN verify error:', err);
+      setPinError('Network error. Please try again.');
+      triggerShake();
+    } finally {
+      setVerifyingPin(false);
+    }
   };
 
   // Submit Vote
@@ -222,12 +273,14 @@ export default function VoterPage() {
       if (!res.ok) {
         if (res.status === 401) {
           setConfirmingCand(null);
+          pinServerVerified.current = false; // Wrong PIN — revoke optimistic unlock
           setPinUnlocked(false);
-          setPinError(true);
+          setPinDigits(['', '', '', '']);
+          setPinError('The Room PIN has changed or is incorrect. Please enter it again.');
           triggerShake();
+          setTimeout(() => pinInputRefs[0].current?.focus(), 50);
           showToast(data.error || 'Incorrect Room PIN.', 'error');
         } else if (res.status === 409) {
-          localStorage.setItem('voted_status', 'true');
           setConfirmingCand(null);
           showToast('You have already cast your vote.', 'info');
           await fetchStatusAndData();
@@ -238,7 +291,6 @@ export default function VoterPage() {
       }
 
       // Vote Success!
-      localStorage.setItem('voted_status', 'true');
       showToast(data.message || 'Vote successfully recorded!', 'success');
       setConfirmingCand(null);
       await fetchStatusAndData();
@@ -575,15 +627,16 @@ export default function VoterPage() {
 
               {pinError && (
                 <p className="text-center text-xs font-semibold text-rose-600 mb-3 animate-fade-up">
-                  Please enter a valid 4-digit PIN.
+                  {pinError}
                 </p>
               )}
 
               <button
                 type="submit"
-                className="w-full min-h-[54px] rounded-full bg-theme-primary hover:bg-theme-dark text-[15px] font-semibold text-white shadow-[0_7px_16px_rgba(0,111,214,0.22)] transition active:scale-[0.98] cursor-pointer"
+                disabled={verifyingPin}
+                className="w-full min-h-[54px] rounded-full bg-theme-primary hover:bg-theme-dark text-[15px] font-semibold text-white shadow-[0_7px_16px_rgba(0,111,214,0.22)] transition active:scale-[0.98] disabled:opacity-50 cursor-pointer"
               >
-                Enter Voting
+                {verifyingPin ? 'Checking...' : 'Enter Voting'}
               </button>
             </form>
           </main>

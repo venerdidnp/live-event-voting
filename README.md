@@ -15,7 +15,7 @@ Designed specifically for seamless deployment to **Vercel** with a serverless **
 - **Anti-Double Vote Security:** 
   - Server-verified `HttpOnly`, `SameSite=Lax` 24-hour cookie (`voted_token`).
   - SHA-256 salted IP hash logging for abuse tracking.
-  - Client-side `localStorage` lock for instantaneous UI feedback.
+  - The server is the single source of truth: stale client-side state can never bypass the room PIN gate.
   - Rate limiting (30 requests/minute per IP) safe for venue Wi-Fi / NAT gateways.
 - **Nominee Grid:** 4:5 portrait cards with tap-to-enlarge photo preview and confirmation dialog.
 - **Auto-Sync:** Real-time polling automatically detects when the stage committee transitions between `WAITING`, `OPEN`, and `CLOSED`.
